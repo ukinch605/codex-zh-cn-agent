@@ -1,0 +1,17 @@
+{
+  "schema": 1,
+  "toolVersion": "1.1.0",
+  "tested": [
+    {
+      "version": "26.803.5235.0",
+      "date": "2026-08-08",
+      "status": "ok",
+      "markers": {
+        "enableI18nFrom": "enable_i18n`,!1)",
+        "enableI18nTo": "enable_i18n`,!0)",
+        "initFrom": "let s=o,c=a?.get(`",
+        "initTo": "let s=1,c=a?.get(`"
+      }
+    }
+  ]
+}

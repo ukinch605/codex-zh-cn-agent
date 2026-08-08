@@ -1,13 +1,21 @@
 ﻿#requires -version 5.1
 <#
-  Codex Desktop 一键汉化安装器（Windows / Microsoft Store 版）
-  用法：powershell -ExecutionPolicy Bypass -File install-zh-cn.ps1 [-Action menu|install|uninstall|status] [-CodexPath "路径"]
+  Codex Desktop 一键汉化安装器（Windows / Microsoft Store 版）v1.1
+  用法：powershell -ExecutionPolicy Bypass -File install-zh-cn.ps1 [-Action menu|install|verify|status|uninstall|check-update|test] [-CodexPath "路径"] [-NoPause] [-Force]
+
+  说明：
+  - 结果文件协议：%USERPROFILE%\.codex\zh-cn-agent\install-result.json
+    安装开始时先写 status=pending，提升后的进程结束时覆盖为 ok / fail（含 code、message、诊断文件路径），供 agent 轮询。
+  - 自包含安装：bat、scripts、versions.json、使用说明等复制到 %USERPROFILE%\.codex\zh-cn-agent\，
+    桌面快捷方式指向该固定副本，仓库被移动/删除后汉化入口仍可用。
+  - 版本自适应：优先查 versions.json 已测版本表；未知版本用通用特征探测；仍失败则写诊断文件并报 VERSION_UNSUPPORTED。
 #>
 param(
-    [ValidateSet("menu","install","uninstall","status")]
+    [ValidateSet("menu","install","uninstall","status","verify","check-update","test")]
     [string]$Action = "menu",
     [string]$CodexPath = "",
-    [switch]$NoPause
+    [switch]$NoPause,
+    [switch]$Force
 )
 
 $ErrorActionPreference = "Stop"
@@ -18,6 +26,20 @@ $projectRoot = Split-Path -Parent $scriptDir
 $launcher = Join-Path $scriptDir "launch-zh-cn.ps1"
 $activeFile = Join-Path $env:USERPROFILE ".codex\zh-cn-patched-active.txt"
 $patchedBase = Join-Path $env:USERPROFILE ".codex\zh-cn-patched"
+$toolHome = Join-Path $env:USERPROFILE ".codex\zh-cn-agent"
+$resultFile = Join-Path $toolHome "install-result.json"
+$installedFile = Join-Path $toolHome "installed.json"
+$versionsFile = Join-Path $projectRoot "versions.json"
+$logDir = Join-Path $toolHome "logs"
+$script:logFile = ""
+
+# 默认特征串（versions.json 缺省时的回退）
+$script:defaultMarkers = [pscustomobject]@{
+    enableI18nFrom = 'enable_i18n`,!1)'
+    enableI18nTo   = 'enable_i18n`,!0)'
+    initFrom       = 'let s=o,c=a?.get(`'
+    initTo         = 'let s=1,c=a?.get(`'
+}
 
 # ---------------- 基础工具 ----------------
 function Test-IsAdministrator {
@@ -41,6 +63,7 @@ function Ensure-Administrator {
     $extra = @("-Action", $Action)
     if ($CodexPath) { $extra += @("-CodexPath", $CodexPath) }
     if ($NoPause) { $extra += "-NoPause" }
+    if ($Force) { $extra += "-Force" }
     Invoke-ElevatedInstaller -ExtraArgs $extra
 }
 
@@ -57,6 +80,37 @@ function Write-Warn([string]$Message) { Write-Host "  [!] $Message" -ForegroundC
 function Write-Bad([string]$Message) { Write-Host "  [X] $Message" -ForegroundColor Red }
 function Write-Info([string]$Message) { Write-Host "  [i] $Message" -ForegroundColor DarkGray }
 
+function Write-Log {
+    param([string]$Message)
+    try {
+        if (-not $script:logFile) {
+            New-Item -ItemType Directory -Path $logDir -Force | Out-Null
+            $script:logFile = Join-Path $logDir ("install-" + (Get-Date -Format 'yyyyMMdd-HHmmss') + ".log")
+        }
+        $line = "[{0}] {1}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $Message
+        Add-Content -LiteralPath $script:logFile -Value $line -Encoding UTF8
+    } catch {}
+}
+
+function Write-ResultFile {
+    param([string]$Status, [string]$Code = "", [string]$Message = "", [string]$CodexVersion = "", [string]$PatchedDir = "", [string]$DiagFile = "")
+    try {
+        New-Item -ItemType Directory -Path $toolHome -Force | Out-Null
+        $obj = [ordered]@{
+            status       = $Status
+            code         = $Code
+            message      = $Message
+            codexVersion = $CodexVersion
+            patchedDir   = $PatchedDir
+            diagFile     = $DiagFile
+            updatedAt    = (Get-Date).ToString("yyyy-MM-ddTHH:mm:ss.fff")
+        }
+        [System.IO.File]::WriteAllText($resultFile, ($obj | ConvertTo-Json), (New-Object System.Text.UTF8Encoding($false)))
+    } catch {
+        Write-Warn "无法写入结果文件: $_"
+    }
+}
+
 function Stop-CodexProcesses {
     Write-Step "正在关闭 Codex 相关进程（防止冲突）..."
     Get-Process -ErrorAction SilentlyContinue |
@@ -66,6 +120,32 @@ function Stop-CodexProcesses {
 }
 
 # ---------------- 查找 Codex ----------------
+function Get-CodexVersion {
+    try {
+        $pkg = Get-AppxPackage -ErrorAction Stop |
+            Where-Object { $_.Name -match 'Codex|OpenAI' } |
+            Sort-Object { try { [version]$_.Version } catch { [version]'0.0.0.0' } } -Descending |
+            Select-Object -First 1
+        if ($pkg) { return [string]$pkg.Version }
+    } catch {}
+    # 回退：从 WindowsApps 目录名或 active 文件记录的原版目录反推版本号
+    $names = @()
+    if (Test-Path "C:\Program Files\WindowsApps") {
+        $names += Get-ChildItem "C:\Program Files\WindowsApps" -Directory -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -match '^OpenAI\.Codex_' } |
+            Select-Object -ExpandProperty Name
+    }
+    if (Test-Path -LiteralPath $activeFile) {
+        $lines = Get-Content -LiteralPath $activeFile -ErrorAction SilentlyContinue | Where-Object { $_.Trim().Length -gt 0 }
+        if ($lines.Count -ge 2) { $names += Split-Path -Leaf (Split-Path -Parent $lines[1]) }
+    }
+    foreach ($n in $names) {
+        $m = [regex]::Match($n, 'OpenAI\.Codex_([0-9]+(?:\.[0-9]+)+)_')
+        if ($m.Success) { return $m.Groups[1].Value }
+    }
+    return $null
+}
+
 function Get-CodexAppDir {
     param([string]$CustomPath)
     if ($CustomPath) {
@@ -77,7 +157,7 @@ function Get-CodexAppDir {
     try {
         $pkg = Get-AppxPackage -ErrorAction Stop |
             Where-Object { $_.Name -match 'Codex|OpenAI' } |
-            Sort-Object { [version]$_.Version } -Descending |
+            Sort-Object { try { [version]$_.Version } catch { [version]'0.0.0.0' } } -Descending |
             Select-Object -First 1
     } catch { $pkg = $null }
     if ($pkg) {
@@ -96,10 +176,20 @@ function Get-CodexAppDir {
             }
         }
     }
+    # 最后回退：已安装机器上，active 文件记录的原版目录
+    if (Test-Path -LiteralPath $activeFile) {
+        $lines = Get-Content -LiteralPath $activeFile -ErrorAction SilentlyContinue | Where-Object { $_.Trim().Length -gt 0 }
+        if ($lines.Count -ge 2) {
+            $c = $lines[1].Trim()
+            foreach ($x in @($c, (Join-Path $c "app"))) {
+                if (Test-Path (Join-Path $x "resources\app.asar")) { return $x }
+            }
+        }
+    }
     return $null
 }
 
-# ---------------- asar 补丁（等长字节替换，不改 asar 结构） ----------------
+# ---------------- asar 读取与补丁（等长字节替换，不改 asar 结构） ----------------
 function Get-AppInitialInfo {
     param([string]$AsarPath)
     $fs = [System.IO.File]::OpenRead($AsarPath)
@@ -125,53 +215,113 @@ function Get-AppInitialInfo {
     } finally { $fs.Dispose() }
 }
 
-function Get-AsarI18nState {
+function Read-AppInitialText {
     param([string]$AsarPath)
-    if (-not (Test-Path $AsarPath)) { return "missing" }
     $info = Get-AppInitialInfo -AsarPath $AsarPath
-    if (-not $info) { return "unsupported" }
+    if (-not $info) { return $null }
     $fs = [System.IO.File]::OpenRead($AsarPath)
     try {
         $start = 16 + $info.HeaderSize + $info.Offset
         $buf = New-Object byte[] $info.Size
         $fs.Position = $start
         [void]$fs.Read($buf, 0, $buf.Length)
-        $enc = [System.Text.Encoding]::GetEncoding(28591)
-        $text = $enc.GetString($buf)
-        if ($text.Contains('enable_i18n`,!0)') -and $text.Contains('let s=1,c=a?.get(`')) { return "patched" }
-        if ($text.Contains('enable_i18n`,!1)') -or $text.Contains('let s=o,c=a?.get(`')) { return "original" }
-        return "unsupported"
+        return [System.Text.Encoding]::GetEncoding(28591).GetString($buf)
     } finally { $fs.Dispose() }
 }
 
-function Patch-AsarEnableI18n {
-    param([string]$AsarPath)
-    $state = Get-AsarI18nState -AsarPath $AsarPath
-    if ($state -eq "patched") { return $true }
-    if ($state -eq "unsupported") {
-        $info = Get-AppInitialInfo -AsarPath $AsarPath
-        $snippet = ""
-        if ($info) {
-            $fs = [System.IO.File]::OpenRead($AsarPath)
-            try {
-                $start = 16 + $info.HeaderSize + $info.Offset
-                $buf = New-Object byte[] $info.Size
-                $fs.Position = $start
-                [void]$fs.Read($buf, 0, $buf.Length)
-                $enc = [System.Text.Encoding]::GetEncoding(28591)
-                $text = $enc.GetString($buf)
-                $i = $text.IndexOf('enable_i18n')
-                if ($i -ge 0) {
-                    $from = [Math]::Max(0, $i - 40)
-                    $len = [Math]::Min(120, $text.Length - $from)
-                    $snippet = $text.Substring($from, $len)
-                }
-            } finally { $fs.Dispose() }
+# ---------------- 特征串解析（版本表 + 通用探测） ----------------
+function Get-TestedMarkers {
+    param([string]$CodexVersion, [string]$VersionsFile = "")
+    $file = if ($VersionsFile) { $VersionsFile } else { $versionsFile }
+    if (-not $CodexVersion -or -not $file -or -not (Test-Path -LiteralPath $file)) { return $null }
+    try {
+        $data = Get-Content -Raw -Encoding UTF8 $file | ConvertFrom-Json
+        if ($data.schema -ne 1) { return $null }
+        $entry = @($data.tested) | Where-Object { $_.version -eq $CodexVersion } | Select-Object -First 1
+        if (-not $entry -or -not $entry.markers) { return $null }
+        return [pscustomobject]@{
+            enableI18nFrom = [string]$entry.markers.enableI18nFrom
+            enableI18nTo   = [string]$entry.markers.enableI18nTo
+            initFrom       = [string]$entry.markers.initFrom
+            initTo         = [string]$entry.markers.initTo
         }
-        throw "当前 Codex 版本的代码结构无法自动识别，请稍后重试或联系维护者。`n文件: $($info.Name)`n片段: $snippet"
+    } catch { return $null }
+}
+
+function Get-I18nStateFromText {
+    param([string]$Text, $Markers)
+    $m = if ($Markers) { $Markers } else { $script:defaultMarkers }
+    if ($Text.Contains([string]$m.enableI18nTo) -and $Text.Contains([string]$m.initTo)) { return "patched" }
+    if ($Text.Contains([string]$m.enableI18nFrom) -or $Text.Contains([string]$m.initFrom)) { return "original" }
+    return "unsupported"
+}
+
+function Find-GenericMarkers {
+    param([string]$Text)
+    $m = $script:defaultMarkers
+    $c1 = [regex]::Matches($Text, [regex]::Escape([string]$m.enableI18nFrom)).Count
+    $c2 = [regex]::Matches($Text, [regex]::Escape([string]$m.initFrom)).Count
+    if ($c1 -ne 1 -or $c2 -ne 1) { return $null }
+    return $m
+}
+
+function Resolve-Markers {
+    param([string]$Text, [string]$CodexVersion, [string]$VersionsFile = "")
+    $m = Get-TestedMarkers -CodexVersion $CodexVersion -VersionsFile $VersionsFile
+    if ($m -and (Get-I18nStateFromText -Text $Text -Markers $m) -eq "original") { return $m }
+    $g = Find-GenericMarkers -Text $Text
+    if ($g) { return $g }
+    return $null
+}
+
+function Get-SnippetFromText {
+    param([string]$Text)
+    $i = $Text.IndexOf('enable_i18n')
+    if ($i -lt 0) { $i = 0 }
+    $from = [Math]::Max(0, $i - 60)
+    $len = [Math]::Min(240, $Text.Length - $from)
+    return $Text.Substring($from, $len)
+}
+
+function Save-Diagnostic {
+    param([string]$CodexVersion, [string]$Snippet, [string]$OutPath = "")
+    $path = if ($OutPath) { $OutPath } else {
+        New-Item -ItemType Directory -Path $logDir -Force | Out-Null
+        Join-Path $logDir ("diagnostic-" + $CodexVersion + ".txt")
     }
+    $content = @(
+        "Codex 版本: $CodexVersion"
+        "生成时间: $((Get-Date).ToString('yyyy-MM-dd HH:mm:ss'))"
+        ""
+        "此文件用于向仓库提交 issue，请把完整内容贴到 https://github.com/ukinch605/codex-zh-cn-agent/issues"
+        ""
+        "代码片段（app-initial JS）:"
+        $Snippet
+    ) -join "`r`n"
+    [System.IO.File]::WriteAllText($path, $content, (New-Object System.Text.UTF8Encoding($false)))
+    return $path
+}
+
+function Get-AsarI18nState {
+    param([string]$AsarPath, $Markers = $null)
+    if (-not (Test-Path -LiteralPath $AsarPath)) { return "missing" }
+    $text = Read-AppInitialText -AsarPath $AsarPath
+    if ($null -eq $text) { return "unsupported" }
+    return Get-I18nStateFromText -Text $text -Markers $Markers
+}
+
+function Invoke-PatchText {
+    param([string]$Text, $Markers)
+    $out = $Text.Replace([string]$Markers.enableI18nFrom, [string]$Markers.enableI18nTo)
+    $out = $out.Replace([string]$Markers.initFrom, [string]$Markers.initTo)
+    if ($out.Length -ne $Text.Length) { throw "PATCH_LENGTH_MISMATCH: 补丁后字符长度变化，已中止" }
+    return $out
+}
+
+function Patch-AsarFile {
+    param([string]$AsarPath, $Markers)
     $info = Get-AppInitialInfo -AsarPath $AsarPath
-    if (-not $info) { throw "无法解析 app.asar" }
+    if (-not $info) { throw "ASAR_PARSE_FAILED: 无法解析 app.asar" }
     $fs = [System.IO.File]::Open($AsarPath, [System.IO.FileMode]::Open, [System.IO.FileAccess]::ReadWrite)
     try {
         $start = 16 + $info.HeaderSize + $info.Offset
@@ -180,26 +330,23 @@ function Patch-AsarEnableI18n {
         [void]$fs.Read($buf, 0, $buf.Length)
         $enc = [System.Text.Encoding]::GetEncoding(28591)
         $text = $enc.GetString($buf)
-        $from1 = 'enable_i18n`,!1)'
-        $to1   = 'enable_i18n`,!0)'
-        $from2 = 'let s=o,c=a?.get(`'
-        $to2   = 'let s=1,c=a?.get(`'
-        $changed = $false
-        if ($text.Contains($from1)) { $text = $text.Replace($from1, $to1); $changed = $true }
-        if ($text.Contains($from2)) { $text = $text.Replace($from2, $to2); $changed = $true }
-        if (-not $changed) { throw "未找到需要修改的内容，请确认原版未改动" }
-        $newBytes = $enc.GetBytes($text)
-        if ($newBytes.Length -ne $buf.Length) { throw "补丁后长度变化，已中止" }
+        $out = Invoke-PatchText -Text $text -Markers $Markers
+        $newBytes = $enc.GetBytes($out)
+        if ($newBytes.Length -ne $buf.Length) { throw "PATCH_LENGTH_MISMATCH: 补丁后字节长度变化，已中止" }
         $fs.Position = $start
         $fs.Write($newBytes, 0, $newBytes.Length)
         $fs.Flush($true)
-        return $true
     } finally { $fs.Dispose() }
+    if ((Get-AsarI18nState -AsarPath $AsarPath -Markers $Markers) -ne "patched") {
+        throw "PATCH_VERIFY_FAILED: 写后复验未通过，请检查 app.asar 是否被占用或版本结构有变化"
+    }
+    return $true
 }
 
 # ---------------- 语言配置 ----------------
 function Set-LocaleOverrideZhCn {
-    $configPath = Join-Path $env:USERPROFILE ".codex\config.toml"
+    param([string]$ConfigPathOverride = "")
+    $configPath = if ($ConfigPathOverride) { $ConfigPathOverride } else { Join-Path $env:USERPROFILE ".codex\config.toml" }
     $dir = Split-Path -Parent $configPath
     if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
     $content = ""
@@ -222,17 +369,55 @@ function Set-LocaleOverrideZhCn {
     [System.IO.File]::WriteAllText($configPath, $content, $utf8NoBom)
 }
 
-# ---------------- 桌面快捷方式 ----------------
+# ---------------- 自包含工具目录 ----------------
+function Get-ToolVersion {
+    if (Test-Path -LiteralPath $versionsFile) {
+        try {
+            $d = Get-Content -Raw -Encoding UTF8 $versionsFile | ConvertFrom-Json
+            if ($d.toolVersion) { return [string]$d.toolVersion }
+        } catch {}
+    }
+    return "1.1.0"
+}
+
+function Install-ToolFiles {
+    param([string]$SourceRoot)
+    $src = [System.IO.Path]::GetFullPath($SourceRoot).TrimEnd('\')
+    $dst = [System.IO.Path]::GetFullPath($toolHome).TrimEnd('\')
+    if ($src -eq $dst) { return }
+    New-Item -ItemType Directory -Path $toolHome -Force | Out-Null
+    foreach ($name in @("安装汉化.bat","启动汉化版.bat","恢复原版.bat","卸载汉化.bat","检查更新.bat","versions.json","使用说明.txt","README.md","AGENTS.md","LICENSE")) {
+        $p = Join-Path $SourceRoot $name
+        if (Test-Path -LiteralPath $p) { Copy-Item -LiteralPath $p -Destination (Join-Path $toolHome $name) -Force }
+    }
+    $scriptsDst = Join-Path $toolHome "scripts"
+    New-Item -ItemType Directory -Path $scriptsDst -Force | Out-Null
+    Copy-Item -Path (Join-Path $SourceRoot "scripts\*") -Destination $scriptsDst -Recurse -Force
+}
+
+function Write-InstalledInfo {
+    param([string]$ToolVersion, [string]$CodexVersion, [string]$PatchedDir, [string]$OrigDir)
+    New-Item -ItemType Directory -Path $toolHome -Force | Out-Null
+    $obj = [ordered]@{
+        toolVersion = $ToolVersion
+        codexVersion = $CodexVersion
+        patchedDir = $PatchedDir
+        origDir = $OrigDir
+        installedAt = (Get-Date).ToString("yyyy-MM-ddTHH:mm:ss.fff")
+    }
+    [System.IO.File]::WriteAllText($installedFile, ($obj | ConvertTo-Json), (New-Object System.Text.UTF8Encoding($false)))
+}
+
 function New-DesktopShortcut {
     $desktop = [Environment]::GetFolderPath("Desktop")
     if (-not $desktop) { $desktop = Join-Path $env:USERPROFILE "Desktop" }
     $lnk = Join-Path $desktop "Codex 汉化版.lnk"
-    $ps = Join-Path $scriptDir "launch-zh-cn.ps1"
+    $ps = Join-Path $toolHome "scripts\launch-zh-cn.ps1"
     $wsh = New-Object -ComObject WScript.Shell
     $sc = $wsh.CreateShortcut($lnk)
     $sc.TargetPath = "powershell.exe"
     $sc.Arguments = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$ps`""
-    $sc.WorkingDirectory = $projectRoot
+    $sc.WorkingDirectory = $toolHome
     $sc.IconLocation = "$env:WINDIR\System32\shell32.dll,43"
     $sc.Description = "启动 Codex 汉化版（zh-CN）"
     $sc.Save()
@@ -242,16 +427,23 @@ function New-DesktopShortcut {
 # ---------------- 安装 ----------------
 function Install-ZhCn {
     param([string]$CodexAppDir)
-    if (-not $CodexAppDir) { throw "未找到 Codex Desktop，请确认已从 Microsoft Store 安装 Codex" }
+    if (-not $CodexAppDir) { throw "CODEX_NOT_FOUND: 未找到 Codex Desktop，请确认已从 Microsoft Store 安装 Codex" }
     $asarPath = Join-Path $CodexAppDir "resources\app.asar"
-    if (-not (Test-Path $asarPath)) { throw "目录中未找到 resources\app.asar：$CodexAppDir" }
+    if (-not (Test-Path -LiteralPath $asarPath)) { throw "ASAR_NOT_FOUND: 目录中未找到 resources\app.asar：$CodexAppDir" }
 
-    $state = Get-AsarI18nState -AsarPath $asarPath
-    Write-Info "检测到 Codex 安装目录: $CodexAppDir"
-    Write-Info "原版状态: $state"
-    if ($state -ne "original" -and $state -ne "patched") {
-        throw "此版本暂时无法自动汉化（结构不识别），请稍后重试或联系维护者。"
+    $codexVersion = Get-CodexVersion
+    Write-Log "开始安装。Codex 版本: $codexVersion，安装目录: $CodexAppDir"
+
+    $origText = Read-AppInitialText -AsarPath $asarPath
+    if ($null -eq $origText) { throw "ASAR_PARSE_FAILED: 无法解析 app.asar（app-initial 未找到）" }
+    $markers = Resolve-Markers -Text $origText -CodexVersion $codexVersion
+    if (-not $markers) {
+        $diag = Save-Diagnostic -CodexVersion $codexVersion -Snippet (Get-SnippetFromText -Text $origText)
+        Write-Log "版本结构无法识别，已生成诊断文件: $diag"
+        throw "VERSION_UNSUPPORTED: 当前 Codex 版本的代码结构无法自动识别，请把诊断文件提交到仓库 issue：$diag"
     }
+    $state = Get-I18nStateFromText -Text $origText -Markers $markers
+    Write-Log "原版资源状态: $state"
 
     $sha = (Get-FileHash -Algorithm SHA256 -LiteralPath $asarPath).Hash.Substring(0, 16).ToLowerInvariant()
     $patchedRoot = Join-Path $patchedBase $sha
@@ -259,26 +451,36 @@ function Install-ZhCn {
 
     Stop-CodexProcesses
 
-    if (Test-Path $patchedApp) {
-        $pState = Get-AsarI18nState -AsarPath (Join-Path $patchedApp "resources\app.asar")
-        if ($pState -eq "patched") {
-            Write-Ok "已存在汉化副本，直接复用。"
-        } else {
-            Write-Warn "旧副本未完成汉化，将重新制作..."
-            Remove-Item -LiteralPath $patchedApp -Recurse -Force
-            New-Item -ItemType Directory -Path $patchedRoot -Force | Out-Null
-            Write-Step "正在复制 Codex 到汉化目录（需要 1-2 分钟）..."
-            Copy-Item -LiteralPath $CodexAppDir -Destination $patchedApp -Recurse -Force
+    # 判断是否需要重建：首次安装 / 缺 installed.json / 副本损坏 / Codex 版本变化
+    $needRebuild = $true
+    $installed = $null
+    if (Test-Path -LiteralPath $installedFile) {
+        try { $installed = Get-Content -Raw -Encoding UTF8 $installedFile | ConvertFrom-Json } catch { $installed = $null }
+    }
+    if (Test-Path -LiteralPath $patchedApp) {
+        $pState = Get-AsarI18nState -AsarPath (Join-Path $patchedApp "resources\app.asar") -Markers $markers
+        if ($pState -eq "patched" -and $installed -and [string]$installed.codexVersion -eq [string]$codexVersion) {
+            $needRebuild = $false
         }
-    } else {
+    }
+    if ($needRebuild) {
+        if (Test-Path -LiteralPath $patchedRoot) {
+            Write-Warn "旧副本版本不匹配或未完成，将重新制作..."
+            Remove-Item -LiteralPath $patchedRoot -Recurse -Force
+        }
         New-Item -ItemType Directory -Path $patchedRoot -Force | Out-Null
         Write-Step "正在复制 Codex 到汉化目录（需要 1-2 分钟）..."
+        Write-Log "复制 $CodexAppDir -> $patchedApp"
         Copy-Item -LiteralPath $CodexAppDir -Destination $patchedApp -Recurse -Force
+        Write-Log "复制完成"
+    } else {
+        Write-Ok "已存在匹配版本的汉化副本，直接复用。"
     }
 
     Write-Step "正在开启中文界面开关..."
-    Patch-AsarEnableI18n -AsarPath (Join-Path $patchedApp "resources\app.asar")
+    Patch-AsarFile -AsarPath (Join-Path $patchedApp "resources\app.asar") -Markers $markers
     Write-Ok "中文界面开关已开启。"
+    Write-Log "补丁完成"
 
     @($patchedRoot, $CodexAppDir) | Set-Content -LiteralPath $activeFile -Encoding UTF8
     Write-Ok "已记录汉化副本位置。"
@@ -286,21 +488,28 @@ function Install-ZhCn {
     Set-LocaleOverrideZhCn
     Write-Ok "语言配置已设为 zh-CN。"
 
+    Install-ToolFiles -SourceRoot $projectRoot
+    Write-Ok "工具已安装到固定目录: $toolHome"
+
     $lnk = New-DesktopShortcut
     Write-Ok "已创建桌面快捷方式: $lnk"
 
+    $toolVersion = Get-ToolVersion
+    Write-InstalledInfo -ToolVersion $toolVersion -CodexVersion $codexVersion -PatchedDir $patchedRoot -OrigDir $CodexAppDir
+
     Write-Step "安装完成！正在启动汉化版 Codex..."
     Start-Sleep -Milliseconds 800
-    if (Test-Path $launcher) {
+    if (Test-Path -LiteralPath $launcher) {
         Start-Process -FilePath "powershell.exe" -ArgumentList @("-NoProfile","-ExecutionPolicy","Bypass","-WindowStyle","Hidden","-File","`"$launcher`"") -WindowStyle Hidden
     }
+    Write-Log "安装完成，已启动汉化版"
 }
 
 # ---------------- 卸载 ----------------
 function Uninstall-ZhCn {
     Stop-CodexProcesses
     $removedRoot = $null
-    if (Test-Path $activeFile) {
+    if (Test-Path -LiteralPath $activeFile) {
         $lines = Get-Content -LiteralPath $activeFile | Where-Object { $_.Trim().Length -gt 0 }
         if ($lines.Count -ge 1) {
             $root = $lines[0].Trim()
@@ -330,22 +539,28 @@ function Uninstall-ZhCn {
     if (-not $desktop) { $desktop = Join-Path $env:USERPROFILE "Desktop" }
     $lnk = Join-Path $desktop "Codex 汉化版.lnk"
     if (Test-Path $lnk) { Remove-Item -LiteralPath $lnk -Force; Write-Ok "已删除桌面快捷方式。" }
+    if (Test-Path -LiteralPath $toolHome) {
+        Write-Step "正在删除工具目录: $toolHome"
+        Remove-Item -LiteralPath $toolHome -Recurse -Force -ErrorAction SilentlyContinue
+    }
     if ($removedRoot) { Write-Ok "汉化副本已删除（原版未受影响）。" }
     Write-Step "卸载完成。请从开始菜单启动原版 Codex（英文）。"
 }
 
-# ---------------- 状态 ----------------
+# ---------------- 状态 / 验证 ----------------
 function Show-Status {
     Write-Title
     $dir = Get-CodexAppDir -CustomPath $CodexPath
     if ($dir) {
         Write-Ok "Codex 安装目录: $dir"
+        $ver = Get-CodexVersion
+        if ($ver) { Write-Info "Codex 版本: $ver" }
         $s = Get-AsarI18nState -AsarPath (Join-Path $dir "resources\app.asar")
         Write-Info "原版资源状态: $s"
     } else {
         Write-Bad "未找到 Codex Desktop 安装目录"
     }
-    if (Test-Path $activeFile) {
+    if (Test-Path -LiteralPath $activeFile) {
         $lines = Get-Content -LiteralPath $activeFile | Where-Object { $_.Trim().Length -gt 0 }
         if ($lines.Count -ge 1) {
             $root = $lines[0].Trim()
@@ -359,6 +574,68 @@ function Show-Status {
     } else {
         Write-Info "尚未安装汉化副本。"
     }
+    if (Test-Path -LiteralPath $installedFile) {
+        try {
+            $info = Get-Content -Raw -Encoding UTF8 $installedFile | ConvertFrom-Json
+            Write-Info "工具版本: $($info.toolVersion)（安装于 $($info.installedAt)）"
+        } catch { Write-Info "installed.json 无法解析。" }
+    } else {
+        Write-Info "尚未安装 v1.1 工具信息（installed.json 缺失）。"
+    }
+}
+
+function Show-Verify {
+    Write-Title
+    $script:verifyOk = $true
+    function Assert-VerifyItem([string]$Name, [bool]$Ok, [string]$Detail = "") {
+        if ($Ok) { Write-Host "VERIFY: $Name=OK" -ForegroundColor Green }
+        else { Write-Host "VERIFY: $Name=FAIL $Detail" -ForegroundColor Red; $script:verifyOk = $false }
+    }
+
+    $patchedRoot = ""
+    $activeOk = $false
+    if (Test-Path -LiteralPath $activeFile) {
+        $lines = @(Get-Content -LiteralPath $activeFile -Encoding UTF8 | Where-Object { $_.Trim().Length -gt 0 })
+        if ($lines.Count -ge 1) {
+            $patchedRoot = $lines[0].Trim()
+            $activeOk = Test-Path (Join-Path $patchedRoot "app\resources\app.asar")
+        }
+    }
+    Assert-VerifyItem "patched-copy" $activeOk "汉化副本缺失: $activeFile"
+
+    $asarOk = $false
+    if ($activeOk) { $asarOk = ((Get-AsarI18nState -AsarPath (Join-Path $patchedRoot "app\resources\app.asar")) -eq "patched") }
+    Assert-VerifyItem "asar-patched" $asarOk "汉化副本 app.asar 未处于 patched 状态"
+
+    $cfgOk = $false
+    $cfgPath = Join-Path $env:USERPROFILE ".codex\config.toml"
+    if (Test-Path $cfgPath) {
+        $cfgContent = Get-Content -Raw $cfgPath
+        $cfgOk = $cfgContent -match 'localeOverride\s*=\s*"zh-CN"'
+    }
+    Assert-VerifyItem "config-locale" $cfgOk $cfgPath
+
+    $desktop = [Environment]::GetFolderPath("Desktop")
+    if (-not $desktop) { $desktop = Join-Path $env:USERPROFILE "Desktop" }
+    $lnkOk = Test-Path (Join-Path $desktop "Codex 汉化版.lnk")
+    Assert-VerifyItem "desktop-shortcut" $lnkOk "桌面快捷方式缺失"
+
+    $procs = @(Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -match '^(codex|chatgpt)$' })
+    $procOk = $true
+    if ($procs.Count -gt 0) {
+        if ($activeOk) {
+            $prefix = (Join-Path $patchedRoot "app")
+            $bad = @($procs | Where-Object { $_.Path -and -not $_.Path.StartsWith($prefix, [System.StringComparison]::OrdinalIgnoreCase) })
+            $procOk = $bad.Count -eq 0
+        } else {
+            $procOk = $false
+        }
+    }
+    Assert-VerifyItem "processes-from-patched" $procOk "检测到非汉化副本进程"
+
+    if ($script:verifyOk) { Write-Host "VERIFY: OVERALL=OK" -ForegroundColor Green; return $true }
+    Write-Host "VERIFY: OVERALL=FAIL" -ForegroundColor Red
+    return $false
 }
 
 # ---------------- 菜单 ----------------
@@ -375,7 +652,8 @@ function Start-Menu {
         Write-Host "    [3] 启动汉化版 Codex"
         Write-Host "    [4] 恢复英文原版"
         Write-Host "    [5] 卸载汉化（删除汉化副本、恢复原配置）"
-        Write-Host "    [6] 退出"
+        Write-Host "    [6] 检查更新（联网，可选功能）"
+        Write-Host "    [7] 退出"
         Write-Host ""
         $choice = Read-Host "  请输入数字后回车"
         switch ($choice) {
@@ -384,8 +662,7 @@ function Start-Menu {
                 Write-Title
                 Write-Step "【安装汉化】"
                 try {
-                    $dir = Get-CodexAppDir -CustomPath $CodexPath
-                    Install-ZhCn -CodexAppDir $dir
+                    Install-ZhCn -CodexAppDir (Get-CodexAppDir -CustomPath $CodexPath)
                     Write-Ok "全部完成！"
                 } catch {
                     Write-Bad $_.Exception.Message
@@ -398,7 +675,7 @@ function Start-Menu {
                 if (-not $NoPause) { Read-Host "按 Enter 返回菜单" | Out-Null }
             }
             "3" {
-                if (Test-Path $launcher) {
+                if (Test-Path -LiteralPath $launcher) {
                     Start-Process -FilePath "powershell.exe" -ArgumentList @("-NoProfile","-ExecutionPolicy","Bypass","-WindowStyle","Hidden","-File","`"$launcher`"") -WindowStyle Hidden
                 }
                 Write-Ok "已在后台启动汉化版 Codex。"
@@ -427,28 +704,94 @@ function Start-Menu {
                 }
                 if (-not $NoPause) { Read-Host "按 Enter 返回菜单" | Out-Null }
             }
-            "6" { return }
+            "6" {
+                Clear-Host
+                Write-Title
+                Write-Step "【检查更新（联网）】"
+                $updater = Join-Path $scriptDir "check-update.ps1"
+                if (Test-Path -LiteralPath $updater) { & $updater -NoPause } else { Write-Bad "未找到 check-update.ps1" }
+                if (-not $NoPause) { Read-Host "按 Enter 返回菜单" | Out-Null }
+            }
+            "7" { return }
             default { Write-Warn "无效输入，请重新选择。"; Start-Sleep -Seconds 1 }
         }
     }
 }
 
 # ---------------- 入口 ----------------
-switch ($Action) {
-    "menu"    { Start-Menu }
-    "install" {
-        Ensure-Administrator
-        try {
-            Install-ZhCn -CodexAppDir (Get-CodexAppDir -CustomPath $CodexPath)
-            Write-Host "RESULT: INSTALL_OK"
-        } catch {
-            Write-Bad $_.Exception.Message
-            Write-Host "RESULT: INSTALL_FAIL"
-            if (-not $NoPause) { Read-Host "按 Enter 退出" | Out-Null }
-            exit 1
+function Invoke-Main {
+    switch ($Action) {
+        "menu" { Start-Menu }
+        "install" {
+            if (-not (Test-IsAdministrator)) {
+                Write-ResultFile -Status "pending" -CodexVersion (Get-CodexVersion)
+                Ensure-Administrator
+            } else {
+                try {
+                    Install-ZhCn -CodexAppDir (Get-CodexAppDir -CustomPath $CodexPath)
+                    Write-Host "RESULT: INSTALL_OK"
+                    $patched = ""
+                    if (Test-Path -LiteralPath $activeFile) {
+                        $lines = @(Get-Content -LiteralPath $activeFile | Where-Object { $_.Trim().Length -gt 0 })
+                        if ($lines.Count -ge 1) { $patched = $lines[0].Trim() }
+                    }
+                    Write-ResultFile -Status "ok" -Code "INSTALL_OK" -CodexVersion (Get-CodexVersion) -PatchedDir $patched
+                } catch {
+                    $msg = $_.Exception.Message
+                    $code = if ($msg -match '^([A-Z][A-Z_]+): ') { $matches[1] } else { "UNKNOWN" }
+                    Write-Bad $msg
+                    Write-Log "安装失败: $code - $msg"
+                    Write-Host "RESULT: INSTALL_FAIL"
+                    $diag = ""
+                    if ($code -eq "VERSION_UNSUPPORTED") {
+                        $diagFile = Get-ChildItem -Path $logDir -Filter "diagnostic-*.txt" -ErrorAction SilentlyContinue |
+                            Sort-Object LastWriteTime -Descending | Select-Object -First 1
+                        if ($diagFile) { $diag = $diagFile.FullName }
+                    }
+                    Write-ResultFile -Status "fail" -Code $code -Message $msg -CodexVersion (Get-CodexVersion) -DiagFile $diag
+                    if (-not $NoPause) { Read-Host "按 Enter 退出" | Out-Null }
+                    exit 1
+                }
+            }
+        }
+        "verify" {
+            if (-not (Show-Verify)) {
+                if (-not $NoPause) { Read-Host "按 Enter 退出" | Out-Null }
+                exit 1
+            }
+        }
+        "status" { Show-Status }
+        "check-update" {
+            $updater = Join-Path $scriptDir "check-update.ps1"
+            if (Test-Path -LiteralPath $updater) { & $updater } else { Write-Bad "未找到 check-update.ps1"; exit 1 }
+        }
+        "test" {
+            $t = Join-Path $scriptDir "tests\tests.ps1"
+            if (Test-Path -LiteralPath $t) { & $t } else { Write-Bad "未找到 tests\tests.ps1"; exit 1 }
+        }
+        "uninstall" {
+            if (-not $Force) {
+                $confirm = Read-Host "确认删除汉化副本并恢复英文？(输入 y 确认)"
+                if ($confirm -notmatch '^[yY]$') {
+                    Write-Info "已取消。"
+                    if (-not $NoPause) { Read-Host "按 Enter 退出" | Out-Null }
+                    exit 0
+                }
+            }
+            Ensure-Administrator
+            try { Uninstall-ZhCn } catch {
+                Write-Bad $_.Exception.Message
+                if (-not $NoPause) { Read-Host "按 Enter 退出" | Out-Null }
+                exit 1
+            }
         }
     }
-    "uninstall" { Ensure-Administrator; try { Uninstall-ZhCn } catch { Write-Bad $_.Exception.Message; if (-not $NoPause) { Read-Host "按 Enter 退出" | Out-Null } ; exit 1 } }
-    "status"  { Show-Status }
 }
-if (-not $NoPause) { Write-Host ""; Read-Host "按 Enter 退出" | Out-Null }
+
+if ($MyInvocation.InvocationName -ne '.') {
+    Invoke-Main
+}
+if (-not $NoPause -and $MyInvocation.InvocationName -ne '.') {
+    Write-Host ""
+    Read-Host "按 Enter 退出" | Out-Null
+}

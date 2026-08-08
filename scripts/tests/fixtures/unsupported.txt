@@ -1,0 +1,1 @@
+var q=2;console.log(`hello`);return q*2;

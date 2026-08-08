@@ -2,64 +2,102 @@
 
 ## Mission
 
-Install the Chinese UI localization for **Codex Desktop** on this Windows machine by running the scripts in this repository. The user asked for this in one sentence; do the whole job for them.
+Install the Chinese UI localization for **Codex Desktop** on this Windows machine by running the scripts in this repository. The user asked for this in one sentence; do the whole job for them: fetch the latest repo, detect, install, restart, verify, and report.
 
 ## Hard safety boundaries (never violate)
 
 - Never modify files under `C:\Program Files\WindowsApps` directly. The installer copies the app first.
 - Never read, write, print, or send `auth.json`, API keys, tokens, or `config.toml` secrets.
 - Never change `model_provider`, `model`, or any model/API settings in `config.toml`.
-- Never make network calls to OpenAI. This works fully offline.
+- Never make network calls to OpenAI. Installation works fully offline.
 - The installer stops and restarts Codex processes (including this session). That is expected; tell the user the window will restart in Chinese.
 
 ## Prerequisites
 
-- Windows 10/11.
-- Codex Desktop installed from Microsoft Store. Detect it:
+- Windows 10/11, Codex Desktop installed from Microsoft Store. Detect it:
 
 ```powershell
-powershell -NoProfile -Command "Get-AppxPackage | Where-Object { $_.Name -match 'Codex|OpenAI' } | Select-Object Name, Version, InstallLocation"
+Get-AppxPackage | Where-Object { $_.Name -match 'Codex|OpenAI' } | Select-Object Name, Version, InstallLocation
 ```
 
-If not found: tell the user to install Codex from Microsoft Store first, then stop.
+- If not found: tell the user to install Codex from Microsoft Store first, then stop.
 
-## Steps
+## Step 0 - Get the repository (always use the latest)
 
-1. **Run the installer**
+```powershell
+git clone https://github.com/ukinch605/codex-zh-cn-agent.git
+cd codex-zh-cn-agent
+```
+
+If `git clone` fails due to network, fall back to the zip archive (same content):
+
+```powershell
+$tmpZip = Join-Path $env:TEMP "codex-zh-cn-agent.zip"
+Invoke-WebRequest -Uri "https://codeload.github.com/ukinch605/codex-zh-cn-agent/zip/refs/heads/main" -OutFile $tmpZip
+Expand-Archive -Path $tmpZip -DestinationPath . -Force
+cd codex-zh-cn-agent-main
+```
+
+## Step 1 - Notify the user before installing
+
+Tell the user (in Chinese): 接下来会请求一次管理员权限（UAC 弹窗请点「是」）；安装完成后当前窗口会自动以中文版重启，这是正常现象。
+
+## Step 2 - Run the installer
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File "scripts\install-zh-cn.ps1" -Action install -NoPause
 ```
 
-- If a UAC prompt appears, ask the user to click **Yes** (admin is required only to copy from the Store install location).
-- Expected success output ends with: `RESULT: INSTALL_OK`
-- On failure the script prints `RESULT: INSTALL_FAIL` plus a reason. Capture and report the exact message.
-- If the script self-elevates and exits (parent process), continue to verification in step 2 instead of assuming failure.
+The parent process writes `status: pending` to `%USERPROFILE%\.codex\zh-cn-agent\install-result.json`, requests UAC elevation, and **exits immediately**. Do not assume failure.
 
-2. **Verify**
-
-- `%USERPROFILE%\.codex\zh-cn-patched-active.txt` exists and contains the patched copy path.
-- `%USERPROFILE%\.codex\config.toml` contains `localeOverride = "zh-CN"`.
-
-3. **Launch the localized app**
+## Step 3 - Poll the result file (up to 5 minutes, every 10 seconds)
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File "scripts\launch-zh-cn.ps1"
+$rf = Join-Path $env:USERPROFILE ".codex\zh-cn-agent\install-result.json"
+$start = Get-Date
+$r = $null
+do {
+    Start-Sleep -Seconds 10
+    if (Test-Path $rf) { $r = Get-Content -Raw -Encoding UTF8 $rf | ConvertFrom-Json }
+} until (($r -and $r.status -in @("ok","fail")) -or ((Get-Date) - $start).TotalMinutes -ge 5)
 ```
 
-Or ask the user to double-click `启动汉化版.bat` / the desktop shortcut `Codex 汉化版`.
+Interpret the result:
 
-4. **Confirm with the user**
+- `ok` → continue to Step 4.
+- `fail` → read `$r.code`, `$r.message`, `$r.diagFile` and handle per the table below.
+- Still `pending` after 5 minutes → the user most likely clicked **No** on the UAC prompt. Tell them: 请在 UAC 弹窗中点击「是」，然后重新发送这条指令。Then stop.
 
-After the window opens, ask the user to confirm the left sidebar (新聊天 / 项目 / 计划 / 插件) and the top menus are Chinese. If they cannot tell yet, wait for the app to finish loading.
+## Step 4 - Verify
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File "scripts\install-zh-cn.ps1" -Action verify -NoPause
+```
+
+Expect every line to read `VERIFY: <item>=OK` and the last line `VERIFY: OVERALL=OK`.
+If any item is FAIL: the installer normally auto-launches the localized app; if no Codex window is open, run `启动汉化版.bat` (or `scripts\launch-zh-cn.ps1`). If verify still fails, rerun the installer once; if it fails again, report the log path.
+
+## Step 5 - Confirm with the user
+
+Ask the user to confirm the left sidebar (新聊天 / 项目 / 计划 / 插件) and the top menus are Chinese. If they cannot tell yet, wait for the app to finish loading.
 
 ## Failure handling
 
-- `RESULT: INSTALL_FAIL` containing “无法自动识别” / “无法识别”: the Codex version structure changed. Report the exact snippet and suggest the user open an issue in this repository (include the snippet).
-- The patched app does not start: make sure **no** Codex/ChatGPT processes are running (the app is single-instance), then run the launch script again.
-- “Already patched” messages: safe to reuse; just launch.
+| `code` | Meaning | Action |
+| --- | --- | --- |
+| `CODEX_NOT_FOUND` | Store version not detected | Ask user to install Codex from Microsoft Store first |
+| `VERSION_UNSUPPORTED` | Code structure not recognized | Read `$r.diagFile` (or `%USERPROFILE%\.codex\zh-cn-agent\logs\diagnostic-*.txt`), show its content, and tell the user to open an issue in this repository with the full file |
+| `ASAR_NOT_FOUND` / `ASAR_PARSE_FAILED` | app.asar missing/unreadable | Report the message and the log path |
+| `COPY_FAILED` / `PATCH_FAILED` / `PATCH_LENGTH_MISMATCH` / `PATCH_VERIFY_FAILED` | Patch pipeline issue | Rerun install once; if it repeats, report `%USERPROFILE%\.codex\zh-cn-agent\logs\install-*.log` |
+| `UNKNOWN` | Unexpected error | Report the exact console message and the latest install log |
 
 ## Cleanup / rollback (only if the user asks)
 
 - Restore English: run `scripts\restore-original.ps1` (or `恢复原版.bat`), then start Codex from the Start menu.
-- Full uninstall: `卸载汉化.bat` (admin), which deletes the patched copy, restores config, and removes the desktop shortcut.
+- Full uninstall: `卸载汉化.bat` (confirmation + UAC), or `install-zh-cn.ps1 -Action uninstall -Force -NoPause` if the user explicitly confirmed. This deletes the patched copy, restores config, removes the shortcut and the tool directory.
+
+## Update strategy
+
+- After a Codex Store update, the localization may need re-installation; the installer automatically rebuilds the patched copy when the version changed.
+- The tool supports new versions via the `versions.json` table plus generic detection. If `VERSION_UNSUPPORTED` occurs, the diagnostic file is the input for a repository issue.
+- Optional online update (`检查更新.bat` / `-Action check-update`) is off by default and only runs when the user explicitly asks.

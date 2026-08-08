@@ -1,0 +1,1 @@
+var x=1;if(t(`flag`)){r(`enable_i18n`,!0)}let s=1,c=a?.get(`k`);doMore(`x`);

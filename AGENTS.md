@@ -4,6 +4,8 @@
 
 Install the Chinese UI localization for **Codex Desktop** on this Windows machine by running the scripts in this repository. The user asked for this in one sentence; do the whole job for them: fetch the latest repo, detect, install, restart, verify, and report.
 
+The restart is a **transitional supervised restart** (a few seconds; no background process remains). The launcher (`scripts/launch-zh-cn.ps1`) writes `%USERPROFILE%\.codex\zh-cn-agent\launch-result.json`; the agent reads it after the window restarts.
+
 ## Hard safety boundaries (never violate)
 
 - Never modify files under `C:\Program Files\WindowsApps` directly. The installer copies the app first.
@@ -40,7 +42,7 @@ cd codex-zh-cn-agent-main
 
 ## Step 1 - Notify the user before installing
 
-Tell the user (in Chinese): 接下来会请求一次管理员权限（UAC 弹窗请点「是」）；安装完成后当前窗口会自动以中文版重启，这是正常现象。
+Tell the user (in Chinese): 接下来会请求一次管理员权限（UAC 弹窗请点「是」）；安装完成后当前窗口会自动以中文版重启（过渡监督式，几秒完成，无后台驻留），这是正常现象。
 
 ## Step 2 - Run the installer
 
@@ -49,6 +51,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "scripts\install-zh-cn.ps1" 
 ```
 
 The parent process writes `status: pending` to `%USERPROFILE%\.codex\zh-cn-agent\install-result.json`, requests UAC elevation, and **exits immediately**. Do not assume failure.
+
+The elevated install process calls the supervised launcher at the end; the current window restarts as the localized app (a few seconds). The agent session may be interrupted during this restart; the thread resumes afterwards and the agent continues.
 
 ## Step 3 - Poll the result file (up to 5 minutes, every 10 seconds)
 
@@ -68,6 +72,11 @@ Interpret the result:
 - `fail` → read `$r.code`, `$r.message`, `$r.diagFile` and handle per the table below.
 - Still `pending` after 5 minutes → the user most likely clicked **No** on the UAC prompt. Tell them: 请在 UAC 弹窗中点击「是」，然后重新发送这条指令。Then stop.
 
+After the window restarts, also read `%USERPROFILE%\.codex\zh-cn-agent\launch-result.json`:
+
+- `status: ok`（`LAUNCH_OK` or `ALREADY_RUNNING`）→ continue to Step 4.
+- `status: fail` → handle per the `LAUNCH_FAILED` row in the failure table below.
+
 ## Step 4 - Verify
 
 ```powershell
@@ -76,6 +85,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "scripts\install-zh-cn.ps1" 
 
 Expect every line to read `VERIFY: <item>=OK` and the last line `VERIFY: OVERALL=OK`.
 If any item is FAIL: the installer normally auto-launches the localized app; if no Codex window is open, run `启动汉化版.bat` (or `scripts\launch-zh-cn.ps1`). If verify still fails, rerun the installer once; if it fails again, report the log path.
+
+Note: verify includes a `last-launch` item that reflects the most recent `launch-result.json`; it only fails if the most recent supervised launch failed.
 
 ## Step 5 - Confirm with the user
 
@@ -89,6 +100,7 @@ Ask the user to confirm the left sidebar (新聊天 / 项目 / 计划 / 插件) 
 | `VERSION_UNSUPPORTED` | Code structure not recognized | Read `$r.diagFile` (or `%USERPROFILE%\.codex\zh-cn-agent\logs\diagnostic-*.txt`), show its content, and tell the user to open an issue in this repository with the full file |
 | `ASAR_NOT_FOUND` / `ASAR_PARSE_FAILED` | app.asar missing/unreadable | Report the message and the log path |
 | `COPY_FAILED` / `PATCH_FAILED` / `PATCH_LENGTH_MISMATCH` / `PATCH_VERIFY_FAILED` | Patch pipeline issue | Rerun install once; if it repeats, report `%USERPROFILE%\.codex\zh-cn-agent\logs\install-*.log` |
+| `LAUNCH_FAILED` | Localized app did not stabilize after install (or the most recent launch failed) | Read `launch-result.json` and `logs\launch-*.log`; rerun install once if it is the first failure; if it repeats, report both files' content |
 | `UNKNOWN` | Unexpected error | Report the exact console message and the latest install log |
 
 ## Cleanup / rollback (only if the user asks)

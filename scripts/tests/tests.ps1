@@ -122,6 +122,73 @@ Assert-True "已收录 26.803.5235.0" ([bool](@($vj.tested) | Where-Object { $_.
 Assert-NotNull "按版本查到特征串" (Get-TestedMarkers -CodexVersion "26.803.5235.0" -VersionsFile $vfile)
 Assert-True "未知版本查表返回空" ($null -eq (Get-TestedMarkers -CodexVersion "99.9.9.9" -VersionsFile $vfile))
 
+# ---------- 监督式启动（launch-zh-cn.ps1） ----------
+Write-Host ""
+Write-Host "【监督式启动】" -ForegroundColor Yellow
+$launcherFile = Join-Path (Split-Path -Parent $PSScriptRoot) "launch-zh-cn.ps1"
+Assert-True "launch-zh-cn.ps1 存在" (Test-Path -LiteralPath $launcherFile)
+. $launcherFile
+
+# 进程分类
+$fakePatched = "C:\Users\VMuser\.codex\zh-cn-patched\abc123\app"
+Assert-Equal "汉化副本路径识别为 patched" "patched" (Get-ProcessKind -Path (Join-Path $fakePatched "ChatGPT.exe") -PatchedAppDir $fakePatched)
+Assert-Equal "原版路径识别为 original" "original" (Get-ProcessKind -Path "C:\Program Files\WindowsApps\OpenAI.Codex_1.0.0_x64__2p2nqsd0c76g0\app\ChatGPT.exe" -PatchedAppDir $fakePatched)
+Assert-Equal "空路径识别为 unknown" "unknown" (Get-ProcessKind -Path "" -PatchedAppDir $fakePatched)
+Assert-Equal "路径大小写不敏感" "patched" (Get-ProcessKind -Path "C:\USERS\VMUSER\.CODEX\ZH-CN-PATCHED\ABC123\APP\codex.exe" -PatchedAppDir $fakePatched)
+
+# 守护决策表
+Assert-Equal "仅汉化运行 -> ok" "ok" (Get-GuardAction -Patched 3 -NonPatched 0)
+Assert-Equal "仅原版运行 -> close" "close" (Get-GuardAction -Patched 0 -NonPatched 2)
+Assert-Equal "汉化与原版并存 -> close" "close" (Get-GuardAction -Patched 1 -NonPatched 1)
+Assert-Equal "无任何进程 -> start" "start" (Get-GuardAction -Patched 0 -NonPatched 0)
+
+# 汉化副本定位
+$tmpLaunch = Join-Path ([System.IO.Path]::GetTempPath()) ("zhcn-launch-" + [guid]::NewGuid().ToString("N"))
+New-Item -ItemType Directory -Path (Join-Path $tmpLaunch "app") -Force | Out-Null
+New-Item -ItemType File -Path (Join-Path $tmpLaunch "app\ChatGPT.exe") -Force | Out-Null
+$activeTmp = Join-Path $tmpLaunch "active.txt"
+Set-Content -LiteralPath $activeTmp -Value "$tmpLaunch`r`nC:\fake\original\app" -Encoding UTF8
+$paths = Resolve-LaunchPaths -ActiveFileOverride $activeTmp
+Assert-Equal "副本定位返回 app 目录" (Join-Path $tmpLaunch "app") $paths.AppDir
+Assert-Equal "副本定位返回启动程序" (Join-Path $tmpLaunch "app\ChatGPT.exe") $paths.ExePath
+Assert-True "副本定位返回副本根目录" ($paths.PatchedRoot -eq $tmpLaunch)
+
+# 结果文件协议
+$logDir = Join-Path $tmpLaunch "logs"
+$resultTmp = Join-Path $tmpLaunch "launch-result.json"
+$logTmp = Join-Path $tmpLaunch "launch-test.log"
+Write-LaunchResult -Status "ok" -Code "LAUNCH_OK" -PatchedDir $tmpLaunch -Attempts 2 -LogFile $logTmp -ResultFileOverride $resultTmp
+$lr = Get-Content -Raw -Encoding UTF8 $resultTmp | ConvertFrom-Json
+Assert-Equal "结果文件 status" "ok" ([string]$lr.status)
+Assert-Equal "结果文件 code" "LAUNCH_OK" ([string]$lr.code)
+Assert-True "结果文件 attempts 为 2" ($lr.attempts -eq 2)
+Assert-True "结果文件记录日志路径" ([string]$lr.logFile -eq $logTmp)
+Assert-True "结果文件 updatedAt 非空" ([bool]$lr.updatedAt)
+
+$resultTmp2 = Join-Path $tmpLaunch "launch-result-fail.json"
+Write-LaunchResult -Status "fail" -Code "LAUNCH_FAILED" -Message "超时" -ResultFileOverride $resultTmp2
+$lr2 = Get-Content -Raw -Encoding UTF8 $resultTmp2 | ConvertFrom-Json
+Assert-Equal "失败结果 status" "fail" ([string]$lr2.status)
+Assert-Equal "失败结果 code" "LAUNCH_FAILED" ([string]$lr2.code)
+Assert-True "失败结果记录 message" ([string]$lr2.message -eq "超时")
+
+Remove-Item -LiteralPath $tmpLaunch -Recurse -Force -ErrorAction SilentlyContinue
+
+# ---------- 旧副本清理 ----------
+Write-Host ""
+Write-Host "【旧副本清理】" -ForegroundColor Yellow
+$tmpClean = Join-Path ([System.IO.Path]::GetTempPath()) ("zhcn-clean-" + [guid]::NewGuid().ToString("N"))
+New-Item -ItemType Directory -Path (Join-Path $tmpClean "root1\app") -Force | Out-Null
+New-Item -ItemType Directory -Path (Join-Path $tmpClean "root2\app") -Force | Out-Null
+New-Item -ItemType Directory -Path (Join-Path $tmpClean "active\app") -Force | Out-Null
+$stale1 = @(Get-StalePatchedRoots -BaseDir $tmpClean -ActiveRoot (Join-Path $tmpClean "active"))
+Assert-True "清理列表排除当前副本" ($stale1.Count -eq 2 -and ($stale1 -notcontains (Join-Path $tmpClean "active")))
+Assert-True "清理列表包含旧副本" (($stale1 -contains (Join-Path $tmpClean "root1")) -and ($stale1 -contains (Join-Path $tmpClean "root2")))
+$stale2 = @(Get-StalePatchedRoots -BaseDir $tmpClean -ActiveRoot "")
+Assert-True "无当前副本时全部视为待清理" ($stale2.Count -eq 3)
+Assert-True "目录不存在时返回空" (@(Get-StalePatchedRoots -BaseDir (Join-Path $tmpClean "nope") -ActiveRoot "").Count -eq 0)
+Remove-Item -LiteralPath $tmpClean -Recurse -Force -ErrorAction SilentlyContinue
+
 # ---------- 汇总 ----------
 Write-Host ""
 Write-Host ("TEST SUMMARY: {0} passed, {1} failed" -f $script:passCount, $script:failCount) -ForegroundColor Cyan

@@ -1,11 +1,13 @@
 ﻿#requires -version 5.1
 <#
-  Codex Desktop 一键汉化安装器（Windows / Microsoft Store 版）v1.1
+  Codex Desktop 一键汉化安装器（Windows / Microsoft Store 版）v1.2
   用法：powershell -ExecutionPolicy Bypass -File install-zh-cn.ps1 [-Action menu|install|verify|status|uninstall|check-update|test] [-CodexPath "路径"] [-NoPause] [-Force]
 
   说明：
   - 结果文件协议：%USERPROFILE%\.codex\zh-cn-agent\install-result.json
     安装开始时先写 status=pending，提升后的进程结束时覆盖为 ok / fail（含 code、message、诊断文件路径），供 agent 轮询。
+    安装完成后由监督式启动脚本另写 launch-result.json（见 scripts/launch-zh-cn.ps1），
+    install-result.json 中记录该文件路径，供重启后的 agent 读取并汇报。
   - 自包含安装：bat、scripts、versions.json、使用说明等复制到 %USERPROFILE%\.codex\zh-cn-agent\，
     桌面快捷方式指向该固定副本，仓库被移动/删除后汉化入口仍可用。
   - 版本自适应：优先查 versions.json 已测版本表；未知版本用通用特征探测；仍失败则写诊断文件并报 VERSION_UNSUPPORTED。
@@ -28,6 +30,7 @@ $activeFile = Join-Path $env:USERPROFILE ".codex\zh-cn-patched-active.txt"
 $patchedBase = Join-Path $env:USERPROFILE ".codex\zh-cn-patched"
 $toolHome = Join-Path $env:USERPROFILE ".codex\zh-cn-agent"
 $resultFile = Join-Path $toolHome "install-result.json"
+$launchResultFile = Join-Path $toolHome "launch-result.json"
 $installedFile = Join-Path $toolHome "installed.json"
 $versionsFile = Join-Path $projectRoot "versions.json"
 $logDir = Join-Path $toolHome "logs"
@@ -93,7 +96,7 @@ function Write-Log {
 }
 
 function Write-ResultFile {
-    param([string]$Status, [string]$Code = "", [string]$Message = "", [string]$CodexVersion = "", [string]$PatchedDir = "", [string]$DiagFile = "")
+    param([string]$Status, [string]$Code = "", [string]$Message = "", [string]$CodexVersion = "", [string]$PatchedDir = "", [string]$DiagFile = "", [string]$LaunchResultFile = "")
     try {
         New-Item -ItemType Directory -Path $toolHome -Force | Out-Null
         $obj = [ordered]@{
@@ -103,6 +106,7 @@ function Write-ResultFile {
             codexVersion = $CodexVersion
             patchedDir   = $PatchedDir
             diagFile     = $DiagFile
+            launchResultFile = $LaunchResultFile
             updatedAt    = (Get-Date).ToString("yyyy-MM-ddTHH:mm:ss.fff")
         }
         [System.IO.File]::WriteAllText($resultFile, ($obj | ConvertTo-Json), (New-Object System.Text.UTF8Encoding($false)))
@@ -424,6 +428,22 @@ function New-DesktopShortcut {
     return $lnk
 }
 
+# ---------------- 旧副本清理 ----------------
+function Get-StalePatchedRoots {
+    param([string]$BaseDir, [string]$ActiveRoot)
+    $stale = @()
+    if (-not $BaseDir -or -not (Test-Path -LiteralPath $BaseDir)) { return $stale }
+    foreach ($d in @(Get-ChildItem -LiteralPath $BaseDir -Directory -ErrorAction SilentlyContinue)) {
+        $full = [System.IO.Path]::GetFullPath($d.FullName)
+        $isActive = $false
+        if ($ActiveRoot) {
+            $isActive = $full.Equals([System.IO.Path]::GetFullPath($ActiveRoot), [System.StringComparison]::OrdinalIgnoreCase)
+        }
+        if (-not $isActive) { $stale += $full }
+    }
+    return $stale
+}
+
 # ---------------- 安装 ----------------
 function Install-ZhCn {
     param([string]$CodexAppDir)
@@ -497,10 +517,23 @@ function Install-ZhCn {
     $toolVersion = Get-ToolVersion
     Write-InstalledInfo -ToolVersion $toolVersion -CodexVersion $codexVersion -PatchedDir $patchedRoot -OrigDir $CodexAppDir
 
+    Write-Step "正在清理旧版本汉化副本..."
+    $stale = @(Get-StalePatchedRoots -BaseDir $patchedBase -ActiveRoot $patchedRoot)
+    if ($stale.Count -gt 0) {
+        foreach ($s in $stale) {
+            Write-Log "删除旧副本: $s"
+            Remove-Item -LiteralPath $s -Recurse -Force -ErrorAction SilentlyContinue
+            Write-Ok "已删除旧副本: $s"
+        }
+    } else {
+        Write-Info "无旧版本汉化副本需要清理。"
+    }
+
     Write-Step "安装完成！正在启动汉化版 Codex..."
     Start-Sleep -Milliseconds 800
     if (Test-Path -LiteralPath $launcher) {
         Start-Process -FilePath "powershell.exe" -ArgumentList @("-NoProfile","-ExecutionPolicy","Bypass","-WindowStyle","Hidden","-File","`"$launcher`"") -WindowStyle Hidden
+        Write-Log "已调用过渡监督式启动脚本（结果见 launch-result.json）"
     }
     Write-Log "安装完成，已启动汉化版"
 }
@@ -509,17 +542,16 @@ function Install-ZhCn {
 function Uninstall-ZhCn {
     Stop-CodexProcesses
     $removedRoot = $null
-    if (Test-Path -LiteralPath $activeFile) {
-        $lines = Get-Content -LiteralPath $activeFile | Where-Object { $_.Trim().Length -gt 0 }
-        if ($lines.Count -ge 1) {
-            $root = $lines[0].Trim()
-            $expectedBase = (Join-Path $env:USERPROFILE ".codex\zh-cn-patched")
-            if ($root.StartsWith($expectedBase, [System.StringComparison]::OrdinalIgnoreCase) -and (Test-Path -LiteralPath $root)) {
-                Write-Step "正在删除汉化副本: $root"
-                Remove-Item -LiteralPath $root -Recurse -Force
-                $removedRoot = $root
-            }
+    $expectedBase = [System.IO.Path]::GetFullPath((Join-Path $env:USERPROFILE ".codex\zh-cn-patched"))
+    if (Test-Path -LiteralPath $patchedBase) {
+        $resolvedBase = [System.IO.Path]::GetFullPath($patchedBase)
+        if ($resolvedBase.StartsWith($expectedBase, [System.StringComparison]::OrdinalIgnoreCase)) {
+            Write-Step "正在删除全部汉化副本: $patchedBase"
+            Remove-Item -LiteralPath $patchedBase -Recurse -Force
+            $removedRoot = $patchedBase
         }
+    }
+    if (Test-Path -LiteralPath $activeFile) {
         Remove-Item -LiteralPath $activeFile -Force -ErrorAction SilentlyContinue
     }
     $configPath = Join-Path $env:USERPROFILE ".codex\config.toml"
@@ -543,7 +575,7 @@ function Uninstall-ZhCn {
         Write-Step "正在删除工具目录: $toolHome"
         Remove-Item -LiteralPath $toolHome -Recurse -Force -ErrorAction SilentlyContinue
     }
-    if ($removedRoot) { Write-Ok "汉化副本已删除（原版未受影响）。" }
+    if ($removedRoot) { Write-Ok "汉化副本已全部删除（原版未受影响）。" }
     Write-Step "卸载完成。请从开始菜单启动原版 Codex（英文）。"
 }
 
@@ -632,6 +664,20 @@ function Show-Verify {
         }
     }
     Assert-VerifyItem "processes-from-patched" $procOk "检测到非汉化副本进程"
+
+    $launchOk = $true
+    $launchDetail = ""
+    if (Test-Path -LiteralPath $launchResultFile) {
+        try {
+            $lr = Get-Content -Raw -Encoding UTF8 $launchResultFile | ConvertFrom-Json
+            $launchOk = ([string]$lr.status -eq "ok")
+            if (-not $launchOk) { $launchDetail = "最近一次启动汉化版失败: code=$($lr.code)（见 launch-result.json）" }
+        } catch {
+            $launchOk = $false
+            $launchDetail = "launch-result.json 无法解析"
+        }
+    }
+    Assert-VerifyItem "last-launch" $launchOk $launchDetail
 
     if ($script:verifyOk) { Write-Host "VERIFY: OVERALL=OK" -ForegroundColor Green; return $true }
     Write-Host "VERIFY: OVERALL=FAIL" -ForegroundColor Red
@@ -735,7 +781,7 @@ function Invoke-Main {
                         $lines = @(Get-Content -LiteralPath $activeFile | Where-Object { $_.Trim().Length -gt 0 })
                         if ($lines.Count -ge 1) { $patched = $lines[0].Trim() }
                     }
-                    Write-ResultFile -Status "ok" -Code "INSTALL_OK" -CodexVersion (Get-CodexVersion) -PatchedDir $patched
+                    Write-ResultFile -Status "ok" -Code "INSTALL_OK" -CodexVersion (Get-CodexVersion) -PatchedDir $patched -LaunchResultFile $launchResultFile
                 } catch {
                     $msg = $_.Exception.Message
                     $code = if ($msg -match '^([A-Z][A-Z_]+): ') { $matches[1] } else { "UNKNOWN" }

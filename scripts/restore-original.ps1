@@ -7,6 +7,13 @@ $ErrorActionPreference = "Stop"
 try { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 } catch {}
 
 Write-Host ""
+Write-Host "正在移除入口自动切换助手..." -ForegroundColor Yellow
+try {
+    Stop-ScheduledTask -TaskName "CodexZhCnEntryGuard" -ErrorAction SilentlyContinue
+    Unregister-ScheduledTask -TaskName "CodexZhCnEntryGuard" -Confirm:$false -ErrorAction SilentlyContinue
+    Write-Host "已移除入口自动切换助手。" -ForegroundColor Green
+} catch {}
+Write-Host ""
 Write-Host "正在关闭汉化版 Codex..." -ForegroundColor Yellow
 Get-Process -ErrorAction SilentlyContinue |
     Where-Object { $_.ProcessName -match '^(codex|chatgpt)$' } |

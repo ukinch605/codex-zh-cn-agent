@@ -42,7 +42,7 @@ cd codex-zh-cn-agent-main
 
 ## Step 1 - Notify the user before installing
 
-Tell the user (in Chinese): 接下来会请求一次管理员权限（UAC 弹窗请点「是」）；安装完成后当前窗口会自动以中文版重启（过渡监督式，几秒完成，无后台驻留），这是正常现象。
+Tell the user (in Chinese): 接下来会请求一次管理员权限（UAC 弹窗请点「是」）；安装完成后当前窗口会自动以中文版重启（过渡监督式，几秒完成），并安装一个登录自启的入口自动切换助手，以后从任何入口打开 Codex 都是中文版。
 
 ## Step 2 - Run the installer
 
@@ -91,6 +91,8 @@ Note: verify includes a `last-launch` item that reflects the most recent `launch
 ## Step 5 - Confirm with the user
 
 Ask the user to confirm the left sidebar (新聊天 / 项目 / 计划 / 插件) and the top menus are Chinese. If they cannot tell yet, wait for the app to finish loading.
+
+Note: after v1.3, opening Codex from any entry (Start menu, taskbar, Store tile) auto-switches to the localized version within 1-2 seconds; a brief English window that then closes is expected.
 
 ## Failure handling
 

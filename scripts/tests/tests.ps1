@@ -189,6 +189,33 @@ Assert-True "无当前副本时全部视为待清理" ($stale2.Count -eq 3)
 Assert-True "目录不存在时返回空" (@(Get-StalePatchedRoots -BaseDir (Join-Path $tmpClean "nope") -ActiveRoot "").Count -eq 0)
 Remove-Item -LiteralPath $tmpClean -Recurse -Force -ErrorAction SilentlyContinue
 
+# ---------- 入口自动切换助手（entry-guard.ps1） ----------
+Write-Host ""
+Write-Host "【入口自动切换助手】" -ForegroundColor Yellow
+$guardFile = Join-Path (Split-Path -Parent $PSScriptRoot) "entry-guard.ps1"
+Assert-True "entry-guard.ps1 存在" (Test-Path -LiteralPath $guardFile)
+. $guardFile
+$ErrorActionPreference = "Stop"
+
+$fakePatched = "C:\Users\VMuser\.codex\zh-cn-patched\abc123\app"
+Assert-Equal "助手:汉化副本路径识别为 patched" "patched" (Get-EntryProcessKind -Path (Join-Path $fakePatched "ChatGPT.exe") -PatchedAppDir $fakePatched)
+Assert-Equal "助手:原版路径识别为 original" "original" (Get-EntryProcessKind -Path "C:\Program Files\WindowsApps\OpenAI.Codex_1.0.0_x64__2p2nqsd0c76g0\app\ChatGPT.exe" -PatchedAppDir $fakePatched)
+Assert-Equal "助手:空路径识别为 unknown" "unknown" (Get-EntryProcessKind -Path "" -PatchedAppDir $fakePatched)
+Assert-Equal "助手:决策 仅汉化 -> none" "none" (Get-EntryAction -Patched 3 -NonPatched 0)
+Assert-Equal "助手:决策 无进程 -> none" "none" (Get-EntryAction -Patched 0 -NonPatched 0)
+Assert-Equal "助手:决策 仅原版 -> switch" "switch" (Get-EntryAction -Patched 0 -NonPatched 2)
+Assert-Equal "助手:决策 并存 -> close-only" "close-only" (Get-EntryAction -Patched 1 -NonPatched 1)
+
+$tmpGuard = Join-Path ([System.IO.Path]::GetTempPath()) ("zhcn-guard-" + [guid]::NewGuid().ToString("N"))
+New-Item -ItemType Directory -Path (Join-Path $tmpGuard "app") -Force | Out-Null
+New-Item -ItemType File -Path (Join-Path $tmpGuard "app\ChatGPT.exe") -Force | Out-Null
+$activeGuard = Join-Path $tmpGuard "active.txt"
+Set-Content -LiteralPath $activeGuard -Value "$tmpGuard`r`nC:\fake\original\app" -Encoding UTF8
+$gp = Get-EntryActivePaths -ActiveFileOverride $activeGuard
+Assert-Equal "助手:副本定位返回启动程序" (Join-Path $tmpGuard "app\ChatGPT.exe") $gp.ExePath
+Assert-True "助手:副本文件缺失时返回空" ($null -eq (Get-EntryActivePaths -ActiveFileOverride (Join-Path $tmpGuard "nope.txt")))
+Remove-Item -LiteralPath $tmpGuard -Recurse -Force -ErrorAction SilentlyContinue
+
 # ---------- 汇总 ----------
 Write-Host ""
 Write-Host ("TEST SUMMARY: {0} passed, {1} failed" -f $script:passCount, $script:failCount) -ForegroundColor Cyan

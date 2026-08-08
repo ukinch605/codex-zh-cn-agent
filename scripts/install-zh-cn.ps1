@@ -444,6 +444,43 @@ function Get-StalePatchedRoots {
     return $stale
 }
 
+# ---------------- 入口自动切换助手 ----------------
+function Install-EntryGuard {
+    $guard = Join-Path $toolHome "scripts\entry-guard.ps1"
+    if (-not (Test-Path -LiteralPath $guard)) {
+        Write-Warn "未找到入口助手脚本（entry-guard.ps1），跳过入口接管。"
+        return
+    }
+    try {
+        Stop-ScheduledTask -TaskName "CodexZhCnEntryGuard" -ErrorAction SilentlyContinue
+        Unregister-ScheduledTask -TaskName "CodexZhCnEntryGuard" -Confirm:$false -ErrorAction SilentlyContinue
+        $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument ("-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"" + $guard + "`"")
+        $trigger = $null
+        try {
+            $trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
+        } catch {
+            $trigger = New-ScheduledTaskTrigger -AtLogOn
+        }
+        $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited
+        $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero) -StartWhenAvailable
+        Register-ScheduledTask -TaskName "CodexZhCnEntryGuard" -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force | Out-Null
+        Write-Ok "已安装入口自动切换助手（登录自启、事件驱动、不联网）。"
+        Write-Log "入口自动切换助手已安装"
+    } catch {
+        Write-Warn ("入口助手安装失败（不影响汉化本体）: " + $_.Exception.Message)
+    }
+}
+
+function Remove-EntryGuard {
+    try {
+        Stop-ScheduledTask -TaskName "CodexZhCnEntryGuard" -ErrorAction SilentlyContinue
+        Unregister-ScheduledTask -TaskName "CodexZhCnEntryGuard" -Confirm:$false -ErrorAction SilentlyContinue
+        Write-Ok "已移除入口自动切换助手。"
+    } catch {
+        Write-Warn ("移除入口助手失败: " + $_.Exception.Message)
+    }
+}
+
 # ---------------- 安装 ----------------
 function Install-ZhCn {
     param([string]$CodexAppDir)
@@ -529,6 +566,8 @@ function Install-ZhCn {
         Write-Info "无旧版本汉化副本需要清理。"
     }
 
+    Install-EntryGuard
+
     Write-Step "安装完成！正在启动汉化版 Codex..."
     Start-Sleep -Milliseconds 800
     if (Test-Path -LiteralPath $launcher) {
@@ -540,6 +579,7 @@ function Install-ZhCn {
 
 # ---------------- 卸载 ----------------
 function Uninstall-ZhCn {
+    Remove-EntryGuard
     Stop-CodexProcesses
     $removedRoot = $null
     $expectedBase = [System.IO.Path]::GetFullPath((Join-Path $env:USERPROFILE ".codex\zh-cn-patched"))
@@ -731,6 +771,7 @@ function Start-Menu {
                 Clear-Host
                 Write-Step "【恢复英文原版】"
                 try {
+                    Remove-EntryGuard
                     Stop-CodexProcesses
                     Write-Info "请从开始菜单中打开 Codex（原版，英文界面）。"
                 } catch {

@@ -1,0 +1,9 @@
+# Local publish tool and artifacts
+publish.ps1
+*.zip
+
+# Local user data
+.codex/
+work/
+*.log
+*.tmp

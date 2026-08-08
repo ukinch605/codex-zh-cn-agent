@@ -9,9 +9,12 @@
 
 ### 方式 A：让 Codex agent 帮你装（推荐 / Recommended）
 
-把下面这句话发给你的 Codex（需要网络可达，或先把本仓库克隆到本地 / 用 Codex 打开本仓库目录）：
+把下面任一句发给你的 Codex：
 
-> 按本仓库 README 和 AGENTS.md 的说明，帮我把 Codex Desktop 界面汉化成中文。
+- 推荐（还没下载仓库，最省事）：克隆 https://github.com/ukinch605/codex-zh-cn-agent 并按照仓库里的 README 和 AGENTS.md 的说明，帮我把 Codex Desktop 界面汉化成中文。
+- 已经用 Codex 打开本仓库目录：按本仓库 README 和 AGENTS.md 的说明，帮我把 Codex Desktop 界面汉化成中文。
+
+> 仓库拉取由 agent 自动完成（git clone 失败会自动回退到 zip 下载）；只有完全离线时才需要先把仓库克隆到本地或用 Codex 打开仓库目录。
 
 Codex 会按 `AGENTS.md` 的流程自动完成：拉取仓库 → 检测版本 → 安装（弹一次 UAC，点「是」）→ 自动重启为中文版 → 验证并汇报。
 

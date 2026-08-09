@@ -471,7 +471,7 @@ function Install-EntryGuard {
             $trigger = New-ScheduledTaskTrigger -AtLogOn
         }
         $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited
-        $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero) -StartWhenAvailable
+        $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero) -StartWhenAvailable -RestartCount 5 -RestartInterval (New-TimeSpan -Minutes 1)
         Register-ScheduledTask -TaskName "CodexZhCnEntryGuard" -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force | Out-Null
         try {
             Start-ScheduledTask -TaskName "CodexZhCnEntryGuard" -ErrorAction Stop

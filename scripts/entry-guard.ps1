@@ -107,29 +107,47 @@ function Test-SwitchNeeded {
 function Invoke-EntryGuardLoop {
     Write-GuardLog "入口自动切换助手启动。"
     $wmiOk = $false
-    try {
-        Register-CimIndicationEvent -Query "SELECT * FROM Win32_ProcessStartTrace WHERE ProcessName='codex.exe' OR ProcessName='chatgpt.exe'" -SourceIdentifier "CodexZhCnEntryStart" -ErrorAction Stop | Out-Null
-        $wmiOk = $true
-        Write-GuardLog "已注册进程启动事件监听。"
-    } catch {
-        Write-GuardLog ("事件监听不可用，回退为定期扫描: " + $_.Exception.Message)
-    }
+    $wmiFailLogged = $false
+    $lastWmiRetry = Get-Date
     $lastScan = Get-Date
+    $lastBeat = Get-Date
     while ($true) {
-        $eventHit = $false
-        if ($wmiOk) {
-            $evt = Wait-Event -SourceIdentifier "CodexZhCnEntryStart" -Timeout 10 -ErrorAction SilentlyContinue
-            if ($evt) {
-                $eventHit = $true
-                Remove-Event -SourceIdentifier "CodexZhCnEntryStart" -ErrorAction SilentlyContinue
-                Start-Sleep -Milliseconds 800
+        try {
+            if (-not $wmiOk -and ((Get-Date) - $lastWmiRetry).TotalSeconds -ge 60) {
+                $lastWmiRetry = Get-Date
+                try {
+                    Register-CimIndicationEvent -Query "SELECT * FROM Win32_ProcessStartTrace WHERE ProcessName='codex.exe' OR ProcessName='chatgpt.exe'" -SourceIdentifier "CodexZhCnEntryStart" -ErrorAction Stop | Out-Null
+                    $wmiOk = $true
+                    Write-GuardLog "已注册进程启动事件监听。"
+                } catch {
+                    if (-not $wmiFailLogged) {
+                        $wmiFailLogged = $true
+                        Write-GuardLog ("事件监听不可用，回退为定期扫描: " + $_.Exception.Message)
+                    }
+                }
             }
-        } else {
-            Start-Sleep -Seconds 10
-        }
-        if ($eventHit -or ((Get-Date) - $lastScan).TotalSeconds -ge 10) {
-            $lastScan = Get-Date
-            Test-SwitchNeeded -Paths (Get-EntryActivePaths)
+            $eventHit = $false
+            if ($wmiOk) {
+                $evt = Wait-Event -SourceIdentifier "CodexZhCnEntryStart" -Timeout 10 -ErrorAction SilentlyContinue
+                if ($evt) {
+                    $eventHit = $true
+                    Remove-Event -SourceIdentifier "CodexZhCnEntryStart" -ErrorAction SilentlyContinue
+                    Start-Sleep -Milliseconds 800
+                }
+            } else {
+                Start-Sleep -Seconds 10
+            }
+            if ($eventHit -or ((Get-Date) - $lastScan).TotalSeconds -ge 10) {
+                $lastScan = Get-Date
+                Test-SwitchNeeded -Paths (Get-EntryActivePaths)
+            }
+            if (((Get-Date) - $lastBeat).TotalSeconds -ge 300) {
+                $lastBeat = Get-Date
+                Write-GuardLog "存活检查正常。"
+            }
+        } catch {
+            Write-GuardLog ("扫描异常（继续运行）: " + $_.Exception.Message)
+            Start-Sleep -Seconds 5
         }
     }
 }

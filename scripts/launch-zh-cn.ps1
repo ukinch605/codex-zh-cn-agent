@@ -203,6 +203,15 @@ function Start-PatchedApp {
     }
 }
 
+function Ensure-EntryGuardRunning {
+    try {
+        Start-ScheduledTask -TaskName "CodexZhCnEntryGuard" -ErrorAction SilentlyContinue
+        Write-LogLine "已确保入口自动切换助手在运行。"
+    } catch {
+        Write-LogLine ("入口助手启动失败（不影响本次启动）: " + $_.Exception.Message)
+    }
+}
+
 # ---------------- 监督式重启 ----------------
 
 function Invoke-SupervisedLaunch {
@@ -269,12 +278,14 @@ function Invoke-Main {
         if (-not $Force -and $info.Patched.Count -gt 0 -and $info.NonPatched.Count -eq 0) {
             Write-LogLine ("汉化版已在运行（{0} 个进程），无需重启。" -f $info.Patched.Count)
             Write-LaunchResult -Status "ok" -Code "ALREADY_RUNNING" -PatchedDir $paths.PatchedRoot -LogFile $script:logFile
+            Ensure-EntryGuardRunning
             exit 0
         }
 
         $ok = Invoke-SupervisedLaunch -Paths $paths
         if ($ok) {
             Write-LaunchResult -Status "ok" -Code "LAUNCH_OK" -PatchedDir $paths.PatchedRoot -Attempts $script:attempts -LogFile $script:logFile
+            Ensure-EntryGuardRunning
             exit 0
         }
 

@@ -1,6 +1,6 @@
 ﻿#requires -version 5.1
 <#
-  启动 Codex 汉化版（zh-CN）— 过渡监督式重启 v1.2
+  启动 Codex 汉化版（zh-CN）— 过渡监督式重启 v1.3
 
   说明：
   - 读取汉化副本记录（%USERPROFILE%\.codex\zh-cn-patched-active.txt）。

@@ -20,7 +20,7 @@ Codex 会按 `AGENTS.md` 的流程自动完成：拉取仓库 → 检测版本 �
 
 ### 方式 B：下载后双击（Fallback）
 
-1. 下载 Release 中的 `codex-zh-cn-agent-v1.1.0.zip` 并解压；
+1. 下载 Release 中的 `codex-zh-cn-agent-v1.3.0.zip` 并解压；
 2. 双击「安装汉化.bat」，UAC 弹窗点「是」，选 1 安装；
 3. 完成后从桌面快捷方式（中文系统为「Codex 汉化版」，其他语言系统为「Codex zh-CN」）或双击「启动汉化版.bat」启动。
 

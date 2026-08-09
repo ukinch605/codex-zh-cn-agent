@@ -78,6 +78,8 @@ After the window restarts, also read `%USERPROFILE%\.codex\zh-cn-agent\launch-re
 - `status: ok`（`LAUNCH_OK` or `ALREADY_RUNNING`）→ continue to Step 4.
 - `status: fail` → handle per the `LAUNCH_FAILED` row in the failure table below.
 
+Note: the restart may interrupt the agent session, and the thread does not always auto-resume afterwards. If the agent did not continue on its own after the window came back, ask the user to send a short message (e.g., 继续) to trigger the final verify; `install-result.json` and `launch-result.json` already contain the state needed to report even without further tool calls.
+
 ## Step 4 - Verify
 
 ```powershell

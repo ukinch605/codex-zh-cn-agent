@@ -1,6 +1,6 @@
 ﻿#requires -version 5.1
 <#
-  Codex Desktop 一键汉化安装器（Windows / Microsoft Store 版）v1.2
+  Codex Desktop 一键汉化安装器（Windows / Microsoft Store 版）v1.3
   用法：powershell -ExecutionPolicy Bypass -File install-zh-cn.ps1 [-Action menu|install|verify|status|uninstall|check-update|test] [-CodexPath "路径"] [-NoPause] [-Force]
 
   说明：
@@ -381,7 +381,7 @@ function Get-ToolVersion {
             if ($d.toolVersion) { return [string]$d.toolVersion }
         } catch {}
     }
-    return "1.1.0"
+    return "1.3.0"
 }
 
 function Install-ToolFiles {
@@ -473,7 +473,12 @@ function Install-EntryGuard {
         $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited
         $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero) -StartWhenAvailable
         Register-ScheduledTask -TaskName "CodexZhCnEntryGuard" -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force | Out-Null
-        Write-Ok "已安装入口自动切换助手（登录自启、事件驱动、不联网）。"
+        try {
+            Start-ScheduledTask -TaskName "CodexZhCnEntryGuard" -ErrorAction Stop
+            Write-Ok "已安装并立即启动入口自动切换助手（登录自启、事件驱动、不联网）。"
+        } catch {
+            Write-Warn ("入口助手已注册但立即启动失败（下次登录自动生效）: " + $_.Exception.Message)
+        }
         Write-Log "入口自动切换助手已安装"
     } catch {
         Write-Warn ("入口助手安装失败（不影响汉化本体）: " + $_.Exception.Message)

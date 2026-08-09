@@ -216,6 +216,14 @@ Assert-Equal "助手:副本定位返回启动程序" (Join-Path $tmpGuard "app\C
 Assert-True "助手:副本文件缺失时返回空" ($null -eq (Get-EntryActivePaths -ActiveFileOverride (Join-Path $tmpGuard "nope.txt")))
 Remove-Item -LiteralPath $tmpGuard -Recurse -Force -ErrorAction SilentlyContinue
 
+# ---------- 快捷方式命名（非中文系统兼容） ----------
+Write-Host ""
+Write-Host "【快捷方式命名】" -ForegroundColor Yellow
+Assert-Equal "简体中文代码页用中文快捷方式名" "Codex 汉化版.lnk" (Get-DesktopShortcutName -CodePage 936)
+Assert-Equal "英文代码页回退 ASCII 名" "Codex zh-CN.lnk" (Get-DesktopShortcutName -CodePage 1252)
+Assert-True "日文代码页回退 ASCII 名" ((Get-DesktopShortcutName -CodePage 932) -eq "Codex zh-CN.lnk")
+Assert-True "默认(当前系统)也能返回名称" ([bool](Get-DesktopShortcutName))
+
 # ---------- 汇总 ----------
 Write-Host ""
 Write-Host ("TEST SUMMARY: {0} passed, {1} failed" -f $script:passCount, $script:failCount) -ForegroundColor Cyan

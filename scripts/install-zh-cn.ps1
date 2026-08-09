@@ -412,10 +412,19 @@ function Write-InstalledInfo {
     [System.IO.File]::WriteAllText($installedFile, ($obj | ConvertTo-Json), (New-Object System.Text.UTF8Encoding($false)))
 }
 
+function Get-DesktopShortcutName {
+    param([int]$CodePage = 0)
+    $cp = if ($CodePage -gt 0) { $CodePage } else { [System.Text.Encoding]::Default.CodePage }
+    # 中文名仅在简体中文代码页(936)下使用；其他系统（如英文 1252）回退为 ASCII 名，
+    # 避免 WSH 在 ANSI 代码页无法表示中文时把文件名写成 "Codex ???.lnk" 导致保存失败。
+    if ($cp -eq 936) { return "Codex 汉化版.lnk" }
+    return "Codex zh-CN.lnk"
+}
+
 function New-DesktopShortcut {
     $desktop = [Environment]::GetFolderPath("Desktop")
     if (-not $desktop) { $desktop = Join-Path $env:USERPROFILE "Desktop" }
-    $lnk = Join-Path $desktop "Codex 汉化版.lnk"
+    $lnk = Join-Path $desktop (Get-DesktopShortcutName)
     $ps = Join-Path $toolHome "scripts\launch-zh-cn.ps1"
     $wsh = New-Object -ComObject WScript.Shell
     $sc = $wsh.CreateShortcut($lnk)
@@ -609,8 +618,13 @@ function Uninstall-ZhCn {
     }
     $desktop = [Environment]::GetFolderPath("Desktop")
     if (-not $desktop) { $desktop = Join-Path $env:USERPROFILE "Desktop" }
-    $lnk = Join-Path $desktop "Codex 汉化版.lnk"
-    if (Test-Path $lnk) { Remove-Item -LiteralPath $lnk -Force; Write-Ok "已删除桌面快捷方式。" }
+    foreach ($lnkName in @("Codex 汉化版.lnk", "Codex zh-CN.lnk")) {
+        $lnk = Join-Path $desktop $lnkName
+        if (Test-Path $lnk) {
+            Remove-Item -LiteralPath $lnk -Force
+            Write-Ok "已删除桌面快捷方式: $lnk"
+        }
+    }
     if (Test-Path -LiteralPath $toolHome) {
         Write-Step "正在删除工具目录: $toolHome"
         Remove-Item -LiteralPath $toolHome -Recurse -Force -ErrorAction SilentlyContinue
@@ -689,7 +703,7 @@ function Show-Verify {
 
     $desktop = [Environment]::GetFolderPath("Desktop")
     if (-not $desktop) { $desktop = Join-Path $env:USERPROFILE "Desktop" }
-    $lnkOk = Test-Path (Join-Path $desktop "Codex 汉化版.lnk")
+    $lnkOk = (Test-Path (Join-Path $desktop "Codex 汉化版.lnk")) -or (Test-Path (Join-Path $desktop "Codex zh-CN.lnk"))
     Assert-VerifyItem "desktop-shortcut" $lnkOk "桌面快捷方式缺失"
 
     $procs = @(Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -match '^(codex|chatgpt)$' })

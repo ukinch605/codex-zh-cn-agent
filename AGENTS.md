@@ -12,6 +12,7 @@ The restart is a **transitional supervised restart** (a few seconds; no backgrou
 - Never read, write, print, or send `auth.json`, API keys, tokens, or `config.toml` secrets.
 - Never change `model_provider`, `model`, or any model/API settings in `config.toml`.
 - Never make network calls to OpenAI. Installation works fully offline.
+- The tool intentionally installs one logon task — the "入口自动切换助手" (entry auto-switch guard, `scripts/entry-guard.ps1`) — so Codex opens in Chinese from any entry point. Install it as the installer does, never remove it during install, and never create any additional persistent watchers. It is removed automatically by restore/uninstall.
 - The installer stops and restarts Codex processes (including this session). That is expected; tell the user the window will restart in Chinese.
 
 ## Prerequisites

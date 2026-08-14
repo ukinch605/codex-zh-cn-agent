@@ -27,12 +27,17 @@ Get-AppxPackage | Where-Object { $_.Name -match 'Codex|OpenAI' } | Select-Object
 
 ## Step 0 - Get the repository (always use the latest)
 
+Try the sources below **in order** and stop at the first one that works.
+While fetching, never change system network settings (proxy, hosts, DNS, firewall, routing) and do not install any network tool — previous sessions caused network loss this way. Use only the commands below.
+
+1) Git clone (GitHub direct):
+
 ```powershell
 git clone https://github.com/ukinch605/codex-zh-cn-agent.git
 cd codex-zh-cn-agent
 ```
 
-If `git clone` fails due to network, fall back to the zip archive (same content):
+2) If `git clone` fails due to network, fall back to the GitHub zip archive (same content):
 
 ```powershell
 $tmpZip = Join-Path $env:TEMP "codex-zh-cn-agent.zip"
@@ -40,6 +45,27 @@ Invoke-WebRequest -Uri "https://codeload.github.com/ukinch605/codex-zh-cn-agent/
 Expand-Archive -Path $tmpZip -DestinationPath . -Force
 cd codex-zh-cn-agent-main
 ```
+
+3) If GitHub direct and codeload are both blocked, try mirror proxies (in order, first reachable wins):
+
+```powershell
+$mirrorUrls = @(
+  "https://gh-proxy.com/https://github.com/ukinch605/codex-zh-cn-agent/archive/refs/heads/main.zip",
+  "https://ghfast.top/https://github.com/ukinch605/codex-zh-cn-agent/archive/refs/heads/main.zip",
+  "https://ghproxy.net/https://github.com/ukinch605/codex-zh-cn-agent/archive/refs/heads/main.zip"
+)
+$tmpZip = Join-Path $env:TEMP "codex-zh-cn-agent.zip"
+foreach ($u in $mirrorUrls) {
+  try {
+    Invoke-WebRequest -Uri $u -OutFile $tmpZip -TimeoutSec 30
+    if ((Get-Item $tmpZip).Length -gt 1000) { break }
+  } catch { }
+}
+Expand-Archive -Path $tmpZip -DestinationPath . -Force
+cd codex-zh-cn-agent-main
+```
+
+4) If all sources above fail: do **not** keep retrying and do **not** modify any network settings. Tell the user (in Chinese): GitHub 在你当前网络下无法访问。请从仓库 Release 页下载最新 `codex-zh-cn-agent-v1.3.2.zip`（可以请朋友帮忙下载后拷贝过来），解压后双击「安装汉化.bat」即可。Then stop.
 
 ## Step 1 - Notify the user before installing
 

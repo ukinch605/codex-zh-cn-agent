@@ -1,4 +1,4 @@
-# Codex 一键汉化（Codex Desktop zh-CN Agent Installer）v1.3
+# Codex 一键汉化（Codex Desktop zh-CN Agent Installer）v1.3.1
 
 > 让 Codex 的界面完整变成中文（左侧会话、新聊天、项目、计划、插件、设置、顶部菜单），全程离线，不登录 OpenAI 账号，不改原版安装，可一键恢复英文。
 > Fully localize Codex Desktop to Chinese (sidebar, new chat, projects, plans, plugins, settings, native menus). Works offline with API-key mode. Never modifies the original install and is fully reversible.
@@ -20,7 +20,7 @@ Codex 会按 `AGENTS.md` 的流程自动完成：拉取仓库 → 检测版本 �
 
 ### 方式 B：下载后双击（Fallback）
 
-1. 下载 Release 中的 `codex-zh-cn-agent-v1.3.0.zip` 并解压；
+1. 下载 Release 中的 `codex-zh-cn-agent-v1.3.1.zip` 并解压；
 2. 双击「安装汉化.bat」，UAC 弹窗点「是」，选 1 安装；
 3. 完成后从桌面快捷方式（中文系统为「Codex 汉化版」，其他语言系统为「Codex zh-CN」）或双击「启动汉化版.bat」启动。
 
@@ -33,6 +33,7 @@ Codex 会按 `AGENTS.md` 的流程自动完成：拉取仓库 → 检测版本 �
 | Codex 版本 | 测试日期 | 状态 | 备注 |
 | --- | --- | --- | --- |
 | 26.803.5235.0 | 2026-08-08 | ✅ 通过 | 本仓库 v1.3 收录 |
+| 26.803.10989.0 | 2026-08-14 | ✅ 通过 | 应用内版本 26.803.81509；本仓库 v1.3.1 收录 |
 
 > 你的版本不在表里？安装器会先做通用特征探测，大多数情况下仍能自动安装；只有结构变化过大才会报「版本无法自动识别」，此时请按下方「故障排查与反馈」提交诊断文件。
 

@@ -216,6 +216,15 @@ Assert-Equal "助手:副本定位返回启动程序" (Join-Path $tmpGuard "app\C
 Assert-True "助手:副本文件缺失时返回空" ($null -eq (Get-EntryActivePaths -ActiveFileOverride (Join-Path $tmpGuard "nope.txt")))
 Remove-Item -LiteralPath $tmpGuard -Recurse -Force -ErrorAction SilentlyContinue
 
+# 单实例互斥（自愈触发）
+$script:GuardMutex = $null
+$mutexName = "TestZhCnEntryGuardMutex"
+Assert-True "助手:首次获取互斥成功" (Test-GuardSingleInstance -MutexName $mutexName)
+Assert-True "助手:已有实例时检测为冲突" (-not (Test-GuardSingleInstance -MutexName $mutexName))
+try { $script:GuardMutex.Dispose(); $script:GuardMutex = $null } catch {}
+Assert-True "助手:释放互斥后可再次获取" (Test-GuardSingleInstance -MutexName $mutexName)
+try { $script:GuardMutex.Dispose(); $script:GuardMutex = $null } catch {}
+
 # ---------- 快捷方式命名（非中文系统兼容） ----------
 Write-Host ""
 Write-Host "【快捷方式命名】" -ForegroundColor Yellow

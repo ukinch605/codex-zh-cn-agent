@@ -123,6 +123,8 @@ Ask the user to confirm the left sidebar (新聊天 / 项目 / 计划 / 插件) 
 
 Note: after v1.3, opening Codex from any entry (Start menu, taskbar, Store tile) auto-switches to the localized version within 1-2 seconds; a brief English window that then closes is expected.
 
+Note (v1.3.3+): the entry guard is self-healing. The scheduled task retriggers every 5 minutes, and the script exits immediately if another instance already holds the mutex; if the guard process is killed for any reason, a new instance takes over within at most 5 minutes. If the user reports "opened from the original icon and it is English", first check whether the guard is running (`Get-ScheduledTask -TaskName CodexZhCnEntryGuard` and `Get-Process powershell`), and if it is missing, start it once (`Start-ScheduledTask -TaskName CodexZhCnEntryGuard`); it should self-heal afterwards.
+
 ## Failure handling
 
 | `code` | Meaning | Action |

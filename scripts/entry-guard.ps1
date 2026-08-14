@@ -1,10 +1,12 @@
 ﻿#requires -version 5.1
 <#
-  Codex 汉化版入口自动切换助手 v1.3（登录自启，隐藏窗口）
+  Codex 汉化版入口自动切换助手 v1.3.3（登录自启 + 每 5 分钟自愈，隐藏窗口）
   作用：让“从任何入口打开 Codex”都能得到中文版。
   - 监听 codex/chatgpt 进程启动事件（WMI 事件驱动），并每 10 秒安全复查一次。
   - 规则：发现原版进程被打开且汉化版未运行 → 关闭原版并启动汉化副本；
           原版与汉化版并存 → 仅关闭原版；只有汉化版 → 不做任何事。
+  - 自愈：计划任务每 5 分钟触发一次；本脚本用命名互斥锁保证同一时刻只有一个实例，
+          已有实例在运行时新触发的实例立即退出，助手进程意外终止后最多 5 分钟自动恢复。
   - 不联网、不访问 OpenAI；恢复原版/卸载时由安装器移除本任务。
   日志：%USERPROFILE%\.codex\zh-cn-agent\logs\entry-guard.log
 #>
@@ -40,6 +42,28 @@ function Get-EntryActivePaths {
     if (-not (Test-Path -LiteralPath $exePath)) { $exePath = Join-Path $appDir "Codex.exe" }
     if (-not (Test-Path -LiteralPath $exePath)) { return $null }
     return [pscustomobject]@{ AppDir = $appDir; ExePath = $exePath }
+}
+
+function Test-GuardSingleInstance {
+    <#
+      命名互斥锁单实例检查（供计划任务重复触发使用）。
+      返回 $true = 本实例应继续运行（抢到互斥权）；$false = 已有实例，应退出。
+      互斥句柄保存在 $script:GuardMutex，保证脚本运行期间不会被垃圾回收。
+    #>
+    param([string]$MutexName = "CodexZhCnEntryGuardMutex")
+    $createdNew = $false
+    try {
+        $m = New-Object System.Threading.Mutex($false, $MutexName, [ref]$createdNew)
+    } catch {
+        Write-GuardLog ("互斥锁创建失败，按可运行处理（防止助手停摆）: " + $_.Exception.Message)
+        return $true
+    }
+    if ($createdNew) {
+        $script:GuardMutex = $m
+        return $true
+    }
+    try { $m.Dispose() } catch {}
+    return $false
 }
 
 function Get-EntryProcessKind {
@@ -153,5 +177,9 @@ function Invoke-EntryGuardLoop {
 }
 
 if ($MyInvocation.InvocationName -ne '.') {
+    if (-not (Test-GuardSingleInstance)) {
+        Write-GuardLog "已有助手实例在运行，本次触发退出。"
+        exit 0
+    }
     Invoke-EntryGuardLoop
 }

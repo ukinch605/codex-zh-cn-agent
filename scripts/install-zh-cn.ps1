@@ -470,12 +470,39 @@ function Install-EntryGuard {
         } catch {
             $trigger = New-ScheduledTaskTrigger -AtLogOn
         }
+        # 每 5 分钟重复触发：配合入口助手的单实例互斥实现自愈
+        # （助手被外部终止后，最多 5 分钟由下一次触发自动拉起；RestartOnFailure 对 0xC000013A 不生效）
+        try {
+            $repTrigger = New-ScheduledTaskTrigger -Once -At (Get-Date).Date.AddMinutes(1) -RepetitionInterval (New-TimeSpan -Minutes 5) -RepetitionDuration (New-TimeSpan -Days 3650)
+            $trigger.Repetition = $repTrigger.Repetition
+        } catch {
+            Write-Warn ("入口助手自愈触发配置失败（不影响登录自启）: " + $_.Exception.Message)
+        }
         $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited
         $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero) -StartWhenAvailable -RestartCount 5 -RestartInterval (New-TimeSpan -Minutes 1)
         Register-ScheduledTask -TaskName "CodexZhCnEntryGuard" -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force | Out-Null
+        $guardLog = Join-Path (Join-Path $toolHome "logs") "entry-guard.log"
+        $guardStarted = $false
         try {
-            Start-ScheduledTask -TaskName "CodexZhCnEntryGuard" -ErrorAction Stop
-            Write-Ok "已安装并立即启动入口自动切换助手（登录自启、事件驱动、不联网）。"
+            for ($attempt = 1; $attempt -le 2; $attempt++) {
+                Start-ScheduledTask -TaskName "CodexZhCnEntryGuard" -ErrorAction Stop
+                # 等待并验证助手确实在运行（日志出现启动行，且任务处于 Running）
+                $before = if (Test-Path -LiteralPath $guardLog) { @(Get-Content -LiteralPath $guardLog -Encoding UTF8).Count } else { 0 }
+                for ($i = 0; $i -lt 20; $i++) {
+                    Start-Sleep -Milliseconds 500
+                    $taskState = (Get-ScheduledTask -TaskName "CodexZhCnEntryGuard" -ErrorAction SilentlyContinue).State
+                    $after = if (Test-Path -LiteralPath $guardLog) { @(Get-Content -LiteralPath $guardLog -Encoding UTF8).Count } else { 0 }
+                    if ($taskState -eq "Running" -and $after -gt $before) { $guardStarted = $true; break }
+                }
+                if ($guardStarted) { break }
+                Stop-ScheduledTask -TaskName "CodexZhCnEntryGuard" -ErrorAction SilentlyContinue
+                Start-Sleep -Seconds 1
+            }
+            if ($guardStarted) {
+                Write-Ok "已安装并启动入口自动切换助手（登录自启、事件驱动、每 5 分钟自愈、不联网）。"
+            } else {
+                Write-Warn "入口助手已注册但本次启动未确认（自愈触发会在最多 5 分钟内自动拉起；若仍未生效，下次登录自动生效）。"
+            }
         } catch {
             Write-Warn ("入口助手已注册但立即启动失败（下次登录自动生效）: " + $_.Exception.Message)
         }

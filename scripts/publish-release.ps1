@@ -1,7 +1,7 @@
 ﻿#requires -version 5.1
 <#
   生成发布 zip（供维护者上传到 GitHub Releases）。
-  用法：powershell -ExecutionPolicy Bypass -File publish-release.ps1 [-Version "1.3.4"]
+  用法：powershell -ExecutionPolicy Bypass -File publish-release.ps1 [-Version "1.3.5"]
         （缺省时自动从 versions.json 读取 toolVersion）
   输出：仓库根目录 codex-zh-cn-agent-v<版本>.zip（*.zip 已被 .gitignore 忽略）
   维护者后续操作：打 tag v<版本>，上传 zip，并在 Release 说明里写明已测试的 Codex 版本。

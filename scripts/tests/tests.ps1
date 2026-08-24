@@ -136,6 +136,8 @@ Assert-Equal "schema 为 1" 1 $vj.schema
 Assert-True "toolVersion 非空" ([bool]$vj.toolVersion)
 Assert-True "已收录 26.803.5235.0" ([bool](@($vj.tested) | Where-Object { $_.version -eq "26.803.5235.0" }))
 Assert-NotNull "按版本查到特征串" (Get-TestedMarkers -CodexVersion "26.803.5235.0" -VersionsFile $vfile)
+Assert-True "已收录 26.818.5229.0" ([bool](@($vj.tested) | Where-Object { $_.version -eq "26.818.5229.0" }))
+Assert-NotNull "按版本查到 26.818.5229.0 特征串" (Get-TestedMarkers -CodexVersion "26.818.5229.0" -VersionsFile $vfile)
 Assert-True "未知版本查表返回空" ($null -eq (Get-TestedMarkers -CodexVersion "99.9.9.9" -VersionsFile $vfile))
 
 # ---------- 监督式启动（launch-zh-cn.ps1） ----------

@@ -278,6 +278,31 @@ function Resolve-Markers {
     return $null
 }
 
+function Export-CandidateMarkers {
+    param([string]$CodexVersion, $Markers)
+    if (-not $CodexVersion -or -not $Markers) { return }
+    try {
+        New-Item -ItemType Directory -Path $logDir -Force | Out-Null
+        $path = Join-Path $logDir ("candidate-" + $CodexVersion + ".json")
+        $obj = [ordered]@{
+            version = $CodexVersion
+            date    = (Get-Date).ToString("yyyy-MM-dd")
+            status  = "ok"
+            markers = [ordered]@{
+                enableI18nFrom = [string]$Markers.enableI18nFrom
+                enableI18nTo   = [string]$Markers.enableI18nTo
+                initFrom       = [string]$Markers.initFrom
+                initTo         = [string]$Markers.initTo
+            }
+        }
+        [System.IO.File]::WriteAllText($path, ($obj | ConvertTo-Json), (New-Object System.Text.UTF8Encoding($false)))
+        Write-Log "通用特征探测成功，已导出候选特征串: $path"
+        Write-Info ("该版本尚未收录进版本表，已导出候选特征串: " + $path)
+    } catch {
+        Write-Log ("候选特征串导出失败: " + $_.Exception.Message)
+    }
+}
+
 function Get-SnippetFromText {
     param([string]$Text)
     $i = $Text.IndexOf('enable_i18n')
@@ -360,8 +385,9 @@ function Set-LocaleOverrideZhCn {
         Copy-Item -LiteralPath $configPath -Destination $bak -Force
         Write-Info "已备份原配置: $bak"
     }
-    if ($content -match 'localeOverride\s*=\s*"[^"]*"') {
-        $content = [regex]::Replace($content, 'localeOverride\s*=\s*"[^"]*"', 'localeOverride = "zh-CN"')
+    $localePattern = '(?m)^[ \t]*localeOverride\s*=\s*(''|")[^''"]*\1'
+    if ($content -match $localePattern) {
+        $content = [regex]::Replace($content, $localePattern, 'localeOverride = "zh-CN"')
     } elseif ($content -match '(?m)^\[desktop\]\s*$') {
         $content = [regex]::Replace($content, '(?m)^\[desktop\]\s*$', "[desktop]`r`nlocaleOverride = `"zh-CN`"", 1)
     } elseif ($content.Trim().Length -eq 0) {
@@ -512,10 +538,22 @@ function Install-EntryGuard {
     }
 }
 
+function Stop-EntryGuardProcesses {
+    try {
+        $procs = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -eq "powershell.exe" -and $_.CommandLine -match 'entry-guard\.ps1' })
+        foreach ($p in $procs) {
+            Write-Log ("正在结束残留的入口助手进程: PID " + $p.ProcessId)
+            Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue
+        }
+    } catch {}
+}
+
 function Remove-EntryGuard {
     try {
         Stop-ScheduledTask -TaskName "CodexZhCnEntryGuard" -ErrorAction SilentlyContinue
         Unregister-ScheduledTask -TaskName "CodexZhCnEntryGuard" -Confirm:$false -ErrorAction SilentlyContinue
+        Stop-EntryGuardProcesses
         Write-Ok "已移除入口自动切换助手。"
     } catch {
         Write-Warn ("移除入口助手失败: " + $_.Exception.Message)
@@ -539,6 +577,9 @@ function Install-ZhCn {
         $diag = Save-Diagnostic -CodexVersion $codexVersion -Snippet (Get-SnippetFromText -Text $origText)
         Write-Log "版本结构无法识别，已生成诊断文件: $diag"
         throw "VERSION_UNSUPPORTED: 当前 Codex 版本的代码结构无法自动识别，请把诊断文件提交到仓库 issue：$diag"
+    }
+    if (-not (Get-TestedMarkers -CodexVersion $codexVersion -VersionsFile $versionsFile)) {
+        Export-CandidateMarkers -CodexVersion $codexVersion -Markers $markers
     }
     $state = Get-I18nStateFromText -Text $origText -Markers $markers
     Write-Log "原版资源状态: $state"
@@ -643,7 +684,7 @@ function Uninstall-ZhCn {
         Write-Ok "已恢复原始语言配置。"
     } elseif (Test-Path $configPath) {
         $content = [System.IO.File]::ReadAllText($configPath)
-        $content = [regex]::Replace($content, '(?m)^\s*localeOverride\s*=\s*"[^"]*"\s*\r?\n', "")
+        $content = [regex]::Replace($content, '(?m)^[ \t]*localeOverride\s*=\s*(''|")[^''"]*\1[ \t]*(\r?\n|$)', "")
         $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
         [System.IO.File]::WriteAllText($configPath, $content, $utf8NoBom)
         Write-Ok "已移除语言覆盖配置。"
@@ -765,6 +806,21 @@ function Show-Verify {
     }
     Assert-VerifyItem "last-launch" $launchOk $launchDetail
 
+    $guardOk = $false
+    $guardDetail = "入口助手任务缺失（CodexZhCnEntryGuard）"
+    try {
+        $gt = Get-ScheduledTask -TaskName "CodexZhCnEntryGuard" -ErrorAction SilentlyContinue
+        if ($gt) {
+            $state = [string]$gt.State
+            $guardOk = ($state -in @("Ready", "Running", "Queued"))
+            if (-not $guardOk) { $guardDetail = "入口助手任务状态异常: $state" }
+        }
+    } catch {
+        $guardOk = $false
+        $guardDetail = "无法读取入口助手任务: " + $_.Exception.Message
+    }
+    Assert-VerifyItem "guard-task" $guardOk $guardDetail
+
     if ($script:verifyOk) { Write-Host "VERIFY: OVERALL=OK" -ForegroundColor Green; return $true }
     Write-Host "VERIFY: OVERALL=FAIL" -ForegroundColor Red
     return $false
@@ -861,6 +917,7 @@ function Invoke-Main {
                 Ensure-Administrator
             } else {
                 try {
+                    Write-ResultFile -Status "pending" -CodexVersion (Get-CodexVersion)
                     Install-ZhCn -CodexAppDir (Get-CodexAppDir -CustomPath $CodexPath)
                     Write-Host "RESULT: INSTALL_OK"
                     $patched = ""

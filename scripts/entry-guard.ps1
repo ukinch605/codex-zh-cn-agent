@@ -66,6 +66,17 @@ function Test-GuardSingleInstance {
     return $false
 }
 
+function Get-GuardMutexName {
+    <#
+      生成按用户隔离的互斥锁名（多用户机器上每个用户独立，互不影响）。
+    #>
+    $sid = ""
+    try { $sid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value } catch {}
+    if (-not $sid) { $sid = $env:USERNAME }
+    $safe = ($sid -replace '[^0-9A-Za-z_-]', '_')
+    return "CodexZhCnEntryGuardMutex_" + $safe
+}
+
 function Get-EntryProcessKind {
     param([string]$Path, [string]$PatchedAppDir)
     if ([string]::IsNullOrWhiteSpace($Path)) { return "unknown" }
@@ -131,22 +142,37 @@ function Test-SwitchNeeded {
 function Invoke-EntryGuardLoop {
     Write-GuardLog "入口自动切换助手启动。"
     $wmiOk = $false
-    $wmiFailLogged = $false
+    $wmiFallbackLogged = $false
     $lastWmiRetry = Get-Date
     $lastScan = Get-Date
     $lastBeat = Get-Date
+    $lastTaskCheck = Get-Date
     while ($true) {
         try {
+            # 计划任务被移除（恢复原版/卸载）时自行退出，防止残留实例继续切换
+            if (((Get-Date) - $lastTaskCheck).TotalSeconds -ge 30) {
+                $lastTaskCheck = Get-Date
+                if (-not (Get-ScheduledTask -TaskName "CodexZhCnEntryGuard" -ErrorAction SilentlyContinue)) {
+                    Write-GuardLog "入口助手计划任务已不存在，助手退出。"
+                    exit 0
+                }
+            }
             if (-not $wmiOk -and ((Get-Date) - $lastWmiRetry).TotalSeconds -ge 60) {
                 $lastWmiRetry = Get-Date
                 try {
                     Register-CimIndicationEvent -Query "SELECT * FROM Win32_ProcessStartTrace WHERE ProcessName='codex.exe' OR ProcessName='chatgpt.exe'" -SourceIdentifier "CodexZhCnEntryStart" -ErrorAction Stop | Out-Null
                     $wmiOk = $true
-                    Write-GuardLog "已注册进程启动事件监听。"
+                    if ($wmiFallbackLogged) {
+                        Write-GuardLog "事件监听恢复成功，已退出定期扫描模式。"
+                    } else {
+                        Write-GuardLog "已注册进程启动事件监听。"
+                    }
                 } catch {
-                    if (-not $wmiFailLogged) {
-                        $wmiFailLogged = $true
-                        Write-GuardLog ("事件监听不可用，回退为定期扫描: " + $_.Exception.Message)
+                    if (-not $wmiFallbackLogged) {
+                        $wmiFallbackLogged = $true
+                        Write-GuardLog ("事件监听不可用，已进入定期扫描模式（每 10 秒扫描一次）: " + $_.Exception.Message)
+                    } else {
+                        Write-GuardLog ("事件监听重试仍失败（保持定期扫描模式）: " + $_.Exception.Message)
                     }
                 }
             }
@@ -177,7 +203,7 @@ function Invoke-EntryGuardLoop {
 }
 
 if ($MyInvocation.InvocationName -ne '.') {
-    if (-not (Test-GuardSingleInstance)) {
+    if (-not (Test-GuardSingleInstance -MutexName (Get-GuardMutexName))) {
         Write-GuardLog "已有助手实例在运行，本次触发退出。"
         exit 0
     }

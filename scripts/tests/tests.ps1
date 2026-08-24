@@ -105,6 +105,22 @@ try {
     Set-LocaleOverrideZhCn -ConfigPathOverride $cfg
     $c3 = Get-Content -Raw $cfg
     Assert-True "替换已有 localeOverride 为 zh-CN" (($c3 -match 'localeOverride\s*=\s*"zh-CN"') -and ($c3 -notmatch 'en-US'))
+    # 注释行不替换；单引号写法替换；带缩进行替换
+    Set-Content -Path $cfg -Value "# localeOverride = `"en-US`"`r`n  localeOverride = 'fr-FR'`r`nother = 1" -Encoding UTF8
+    Set-LocaleOverrideZhCn -ConfigPathOverride $cfg
+    $c4 = Get-Content -Raw $cfg
+    Assert-True "注释掉的 localeOverride 不被替换" ($c4 -match '# localeOverride = "en-US"')
+    Assert-True "单引号 localeOverride 被替换为 zh-CN" (($c4 -match 'localeOverride = "zh-CN"') -and ($c4 -notmatch 'fr-FR'))
+    # 候选特征串导出（未收录版本安装成功后自动生成）
+    $savedLogDir = $logDir
+    $logDir = Join-Path $tmp "logs"
+    Export-CandidateMarkers -CodexVersion "26.999.1234.0" -Markers $markers
+    $cand = Join-Path $logDir "candidate-26.999.1234.0.json"
+    Assert-True "候选特征串文件已生成" (Test-Path -LiteralPath $cand)
+    $cj = Get-Content -Raw -Encoding UTF8 $cand | ConvertFrom-Json
+    Assert-Equal "候选特征串 version" "26.999.1234.0" ([string]$cj.version)
+    Assert-True "候选特征串含 markers" ([bool]$cj.markers.enableI18nFrom)
+    $logDir = $savedLogDir
 } finally {
     Remove-Item -LiteralPath $tmp -Recurse -Force -ErrorAction SilentlyContinue
 }
@@ -224,6 +240,9 @@ Assert-True "助手:已有实例时检测为冲突" (-not (Test-GuardSingleInsta
 try { $script:GuardMutex.Dispose(); $script:GuardMutex = $null } catch {}
 Assert-True "助手:释放互斥后可再次获取" (Test-GuardSingleInstance -MutexName $mutexName)
 try { $script:GuardMutex.Dispose(); $script:GuardMutex = $null } catch {}
+$mutexPerUser = Get-GuardMutexName
+Assert-True "助手:互斥锁名按用户隔离" ($mutexPerUser -like "CodexZhCnEntryGuardMutex_*")
+Assert-True "助手:互斥锁名非空" ([bool]$mutexPerUser)
 
 # ---------- 快捷方式命名（非中文系统兼容） ----------
 Write-Host ""

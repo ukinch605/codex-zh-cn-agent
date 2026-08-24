@@ -129,6 +129,15 @@ New-Item -ItemType Directory -Path $toolHome -Force | Out-Null
 Copy-Item -Path (Join-Path $newRoot "*") -Destination $toolHome -Recurse -Force
 Write-Ok "工具已更新到 $remoteTag。"
 
+# 清理旧备份：只保留最近一份，避免多次更新累积磁盘占用
+$backups = @(Get-ChildItem -LiteralPath $env:USERPROFILE -Directory -Filter ".codex\zh-cn-agent.bak-*" -ErrorAction SilentlyContinue | Sort-Object Name -Descending)
+if ($backups.Count -gt 1) {
+    foreach ($old in @($backups | Select-Object -Skip 1)) {
+        Write-Info ("清理旧备份: " + $old.FullName)
+        Remove-Item -LiteralPath $old.FullName -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
 Write-Step "正在重新安装汉化（请在弹出的 UAC 窗口中点击「是」）..."
 $installer = Join-Path $toolHome "scripts\install-zh-cn.ps1"
 Start-Process -FilePath "powershell.exe" -Verb RunAs -ArgumentList @("-NoProfile","-ExecutionPolicy","Bypass","-File","`"$installer`"","-Action","install","-NoPause")

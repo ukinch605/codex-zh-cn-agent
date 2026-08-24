@@ -1,16 +1,24 @@
 ﻿#requires -version 5.1
 <#
   生成发布 zip（供维护者上传到 GitHub Releases）。
-  用法：powershell -ExecutionPolicy Bypass -File publish-release.ps1 [-Version "1.1.0"]
+  用法：powershell -ExecutionPolicy Bypass -File publish-release.ps1 [-Version "1.3.4"]
+        （缺省时自动从 versions.json 读取 toolVersion）
   输出：仓库根目录 codex-zh-cn-agent-v<版本>.zip（*.zip 已被 .gitignore 忽略）
   维护者后续操作：打 tag v<版本>，上传 zip，并在 Release 说明里写明已测试的 Codex 版本。
 #>
-param([string]$Version = "1.1.0")
+param([string]$Version = "")
 
 $ErrorActionPreference = "Stop"
 try { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 } catch {}
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
+
+# 版本默认从 versions.json 读取（避免发布时把包内 toolVersion 降回旧值）
+$repoVersionsFile = Join-Path $repoRoot "versions.json"
+$repoVersions = Get-Content -Raw -Encoding UTF8 $repoVersionsFile | ConvertFrom-Json
+if (-not $Version) { $Version = [string]$repoVersions.toolVersion }
+if ($Version -notmatch '^\d+\.\d+\.\d+$') { throw "无效版本号: $Version（示例: 1.3.4）" }
+
 $staging = Join-Path $env:TEMP ("codex-zh-cn-publish-" + [guid]::NewGuid().ToString("N"))
 $pkgDir = Join-Path $staging ("codex-zh-cn-agent-v" + $Version)
 New-Item -ItemType Directory -Path $pkgDir -Force | Out-Null

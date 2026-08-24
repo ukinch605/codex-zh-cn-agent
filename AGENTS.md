@@ -65,7 +65,7 @@ Expand-Archive -Path $tmpZip -DestinationPath . -Force
 cd codex-zh-cn-agent-main
 ```
 
-4) If all sources above fail: do **not** keep retrying and do **not** modify any network settings. Tell the user (in Chinese): GitHub 在你当前网络下无法访问。请从仓库 Release 页下载最新 `codex-zh-cn-agent-v1.3.2.zip`（可以请朋友帮忙下载后拷贝过来），解压后双击「安装汉化.bat」即可。Then stop.
+4) If all sources above fail: do **not** keep retrying and do **not** modify any network settings. Tell the user (in Chinese): GitHub 在你当前网络下无法访问。请从仓库 Release 页下载最新 `codex-zh-cn-agent-v<版本>.zip`（版本号以 Releases 页为准；可以请朋友帮忙下载后拷贝过来），解压后双击「安装汉化.bat」即可。Then stop.
 
 ## Step 1 - Notify the user before installing
 

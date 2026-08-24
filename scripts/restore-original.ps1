@@ -6,6 +6,17 @@
 $ErrorActionPreference = "Stop"
 try { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 } catch {}
 
+function Stop-EntryGuardProcesses {
+    try {
+        $procs = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -eq "powershell.exe" -and $_.CommandLine -match 'entry-guard\.ps1' })
+        foreach ($p in $procs) {
+            Write-Host ("正在结束残留的入口助手进程: PID " + $p.ProcessId) -ForegroundColor Yellow
+            Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue
+        }
+    } catch {}
+}
+
 Write-Host ""
 Write-Host "正在移除入口自动切换助手..." -ForegroundColor Yellow
 try {
@@ -13,6 +24,21 @@ try {
     Unregister-ScheduledTask -TaskName "CodexZhCnEntryGuard" -Confirm:$false -ErrorAction SilentlyContinue
     Write-Host "已移除入口自动切换助手。" -ForegroundColor Green
 } catch {}
+Stop-EntryGuardProcesses
+Write-Host ""
+Write-Host "正在恢复原始语言配置..." -ForegroundColor Yellow
+$configPath = Join-Path $env:USERPROFILE ".codex\config.toml"
+$bak = "$configPath.bak-zhcn"
+if (Test-Path $bak) {
+    Copy-Item -LiteralPath $bak -Destination $configPath -Force
+    Remove-Item -LiteralPath $bak -Force -ErrorAction SilentlyContinue
+    Write-Host "已恢复原始语言配置。" -ForegroundColor Green
+} elseif (Test-Path $configPath) {
+    $content = [System.IO.File]::ReadAllText($configPath)
+    $content = [regex]::Replace($content, '(?m)^[ \t]*localeOverride\s*=\s*(''|")[^''"]*\1[ \t]*(\r?\n|$)', "")
+    [System.IO.File]::WriteAllText($configPath, $content, (New-Object System.Text.UTF8Encoding($false)))
+    Write-Host "已移除语言覆盖配置。" -ForegroundColor Green
+}
 Write-Host ""
 Write-Host "正在关闭汉化版 Codex..." -ForegroundColor Yellow
 Get-Process -ErrorAction SilentlyContinue |

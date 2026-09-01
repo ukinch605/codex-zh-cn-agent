@@ -16,20 +16,20 @@ jobs:
         shell: powershell
         run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts\install-zh-cn.ps1 -Action test -NoPause
 
-      - name: Validate bat wrappers are pure ASCII
+      - name: Validate bat/vbs wrappers are pure ASCII
         shell: powershell
         run: |
           $bad = @()
-          Get-ChildItem -Recurse -Filter *.bat | ForEach-Object {
+          Get-ChildItem -Recurse -Include *.bat,*.vbs -Path . | ForEach-Object {
             $bytes = [System.IO.File]::ReadAllBytes($_.FullName)
             if ($bytes | Where-Object { $_ -gt 127 }) { $bad += $_.FullName }
           }
           if ($bad.Count -gt 0) {
-            Write-Host "Non-ASCII bat files:"
+            Write-Host "Non-ASCII wrapper files:"
             $bad | ForEach-Object { Write-Host "  $_" }
             exit 1
           }
-          Write-Host "All bat files are pure ASCII."
+          Write-Host "All bat/vbs files are pure ASCII."
 
       - name: Validate ps1 files carry UTF-8 BOM (PowerShell 5.1 compat)
         shell: powershell

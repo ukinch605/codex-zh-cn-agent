@@ -214,6 +214,12 @@ $guardFile = Join-Path (Split-Path -Parent $PSScriptRoot) "entry-guard.ps1"
 Assert-True "entry-guard.ps1 存在" (Test-Path -LiteralPath $guardFile)
 . $guardFile
 $ErrorActionPreference = "Stop"
+$guardLauncherFile = Join-Path (Split-Path -Parent $PSScriptRoot) "entry-guard-launcher.vbs"
+Assert-True "入口助手启动器 vbs 存在" (Test-Path -LiteralPath $guardLauncherFile)
+$vbsContent = Get-Content -Raw -Encoding ASCII $guardLauncherFile
+Assert-True "启动器以隐藏窗口运行" ($vbsContent -match 'shell\.Run .*0, False')
+Assert-True "启动器指向 entry-guard.ps1" ($vbsContent -match 'entry-guard\.ps1')
+Assert-True "启动器为纯 ASCII" (-not ([regex]::IsMatch($vbsContent, '[^\x00-\x7F]')))
 
 $fakePatched = "C:\Users\VMuser\.codex\zh-cn-patched\abc123\app"
 Assert-Equal "助手:汉化副本路径识别为 patched" "patched" (Get-EntryProcessKind -Path (Join-Path $fakePatched "ChatGPT.exe") -PatchedAppDir $fakePatched)

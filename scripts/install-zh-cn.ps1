@@ -489,7 +489,14 @@ function Install-EntryGuard {
     try {
         Stop-ScheduledTask -TaskName "CodexZhCnEntryGuard" -ErrorAction SilentlyContinue
         Unregister-ScheduledTask -TaskName "CodexZhCnEntryGuard" -Confirm:$false -ErrorAction SilentlyContinue
-        $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument ("-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"" + $guard + "`"")
+        # 优先使用 VBScript 隐藏启动器：计划任务直接启动 powershell 会在部分系统闪现命令行窗口
+        $guardLauncher = Join-Path $toolHome "scripts\entry-guard-launcher.vbs"
+        if (Test-Path -LiteralPath $guardLauncher) {
+            $action = New-ScheduledTaskAction -Execute "wscript.exe" -Argument ("`"" + $guardLauncher + "`"")
+            Write-Log "入口助手任务使用隐藏启动器: wscript.exe $guardLauncher"
+        } else {
+            $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument ("-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"" + $guard + "`"")
+        }
         $trigger = $null
         try {
             $trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME

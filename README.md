@@ -1,4 +1,4 @@
-# Codex 一键汉化（Codex Desktop zh-CN Agent Installer）v1.4.0
+# Codex 一键汉化（Codex Desktop zh-CN Agent Installer）v1.4.1
 
 > 让 Codex 的界面完整变成中文（左侧会话、新聊天、项目、计划、插件、设置、顶部菜单），全程离线，不登录 OpenAI 账号，不改原版安装，可一键恢复英文。
 > Fully localize Codex Desktop to Chinese (sidebar, new chat, projects, plans, plugins, settings, native menus). Works offline with API-key mode. Never modifies the original install and is fully reversible.
@@ -20,7 +20,7 @@ Codex 会按 `AGENTS.md` 的流程自动完成：拉取仓库 → 检测版本 �
 
 ### 方式 B：下载后双击（Fallback）
 
-1. 下载 Release 中的 `codex-zh-cn-agent-v1.4.0.zip` 并解压；
+1. 下载 Release 中的 `codex-zh-cn-agent-v1.4.1.zip` 并解压；
 2. 双击「安装汉化.bat」，UAC 弹窗点「是」，选 1 安装；
 3. 完成后从桌面快捷方式（中文系统为「Codex 汉化版」，其他语言系统为「Codex zh-CN」）或双击「启动汉化版.bat」启动。
 
@@ -67,7 +67,7 @@ Codex 会按 `AGENTS.md` 的流程自动完成：拉取仓库 → 检测版本 �
 ## 常见问题（FAQ）
 
 - **打开还是英文？** 安装后从任何入口打开 Codex 都会在约 1~2 秒内自动切换为中文版（原版英文窗口会短暂出现后被自动替换，属正常现象）。若未生效，先彻底关闭 Codex（任务栏右键退出），再重跑「安装汉化.bat」。
-- **GitHub 打不开 / 下载不了仓库？** agent 会自动按「GitHub 直连 → 备用域名 → 镜像站」的顺序尝试，全程不会改动你的网络设置；如果全部失败，会明确告诉你改用离线包：从 Release 下载 `codex-zh-cn-agent-v1.4.0.zip`（可以请朋友帮忙下载后传给你），解压后双击「安装汉化.bat」即可，全程不需要访问 GitHub。
+- **GitHub 打不开 / 下载不了仓库？** agent 会自动按「GitHub 直连 → 备用域名 → 镜像站」的顺序尝试，全程不会改动你的网络设置；如果全部失败，会明确告诉你改用离线包：从 Release 下载 `codex-zh-cn-agent-v1.4.1.zip`（可以请朋友帮忙下载后传给你），解压后双击「安装汉化.bat」即可，全程不需要访问 GitHub。
 - **桌面快捷方式叫什么？** 中文系统为「Codex 汉化版」，其他语言系统为 ASCII 名「Codex zh-CN」；双击它可直接启动中文版。
 - **Codex 自动更新后汉化失效？** 重新运行「安装汉化.bat」选 1 即可；如果提示“版本无法自动识别”，按下方反馈方式提交诊断文件。
 - **需要管理员权限吗？** 只需要安装/卸载时（复制商店安装目录会弹 UAC，点「是」）；日常启动不需要。

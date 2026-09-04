@@ -651,6 +651,15 @@ function Install-ZhCnLocaleOnly {
     # 清理旧补丁模式残留：入口助手任务/副本记录/桌面快捷方式
     Remove-EntryGuard
     if (Test-Path -LiteralPath $activeFile) { Remove-Item -LiteralPath $activeFile -Force -ErrorAction SilentlyContinue }
+    $pb = Join-Path $env:USERPROFILE ".codex\zh-cn-patched"
+    $expectedBase2 = [System.IO.Path]::GetFullPath((Join-Path $env:USERPROFILE ".codex\zh-cn-patched"))
+    if (Test-Path -LiteralPath $pb) {
+        $resolvedBase2 = [System.IO.Path]::GetFullPath($pb)
+        if ($resolvedBase2.StartsWith($expectedBase2, [System.StringComparison]::OrdinalIgnoreCase)) {
+            Remove-Item -LiteralPath $pb -Recurse -Force -ErrorAction SilentlyContinue
+            Write-Log "已删除旧汉化副本目录以释放空间: $pb"
+        }
+    }
     $desktopL = [Environment]::GetFolderPath("Desktop")
     if (-not $desktopL) { $desktopL = Join-Path $env:USERPROFILE "Desktop" }
     foreach ($lnkName in @("Codex 汉化版.lnk", "Codex zh-CN.lnk")) {
@@ -790,6 +799,14 @@ function Get-StorePolicyAutoDownload {
         return $v
     } catch { return $null }
 }
+function Test-LocaleAllowedProcessPath {
+    param([string]$Path)
+    if ([string]::IsNullOrWhiteSpace($Path)) { return $true }
+    if ($Path.StartsWith("C:\Program Files\WindowsApps", [System.StringComparison]::OrdinalIgnoreCase)) { return $true }
+    if ($Path -match '(?i)(OpenAI\\Codex|\.codex)') { return $true }
+    return $false
+}
+
 function Test-StoreUpdatesFrozen {
     param($Value)
     return ($null -ne $Value -and ([int]$Value -eq 2))
@@ -978,7 +995,7 @@ function Show-Verify {
         $procsLO = @(Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -match '^(codex|chatgpt)$' })
         $origOk = $true
         if ($procsLO.Count -gt 0) {
-            $badLO = @($procsLO | Where-Object { $_.Path -and -not $_.Path.StartsWith("C:\Program Files\WindowsApps", [System.StringComparison]::OrdinalIgnoreCase) })
+            $badLO = @($procsLO | Where-Object { $_.Path -and -not (Test-LocaleAllowedProcessPath -Path $_.Path) })
             $origOk = $badLO.Count -eq 0
         }
         Assert-VerifyItem "processes-from-original" $origOk "检测到非原版进程"

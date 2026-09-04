@@ -288,6 +288,15 @@ Assert-True "robocopy 复制成功" (Test-Path -LiteralPath (Join-Path $dstC "a.
 Assert-True "复制内容一致" ((Get-Content -Raw (Join-Path $dstC "a.txt")) -eq "hello")
 Remove-Item -LiteralPath $tmpCopy -Recurse -Force -ErrorAction SilentlyContinue
 
+# ---------- locale-only 进程路径判定 ----------
+Write-Host ""
+Write-Host "【locale-only 进程路径】" -ForegroundColor Yellow
+Assert-True "原版 WindowsApps 路径允许" (Test-LocaleAllowedProcessPath -Path "C:\Program Files\WindowsApps\OpenAI.Codex_26.901.4073.0_x64__2p2nqsd0c76g0\app\ChatGPT.exe")
+Assert-True "AppData CLI 后端允许" (Test-LocaleAllowedProcessPath -Path "C:\Users\vboxuser\AppData\Local\OpenAI\Codex\bin\1e3e57cdf0634c02\codex.exe")
+Assert-True ".codex 路径允许" (Test-LocaleAllowedProcessPath -Path "C:\Users\vboxuser\.codex\zh-cn-agent\scripts\codex.exe")
+Assert-True "空路径允许" (Test-LocaleAllowedProcessPath -Path "")
+Assert-True "随机系统路径拒绝" (-not (Test-LocaleAllowedProcessPath -Path "C:\Windows\System32\notepad.exe"))
+
 # ---------- freeze / officialLocaleSince ----------
 Write-Host ""
 Write-Host "【商店冻结与官方语言检测】" -ForegroundColor Yellow

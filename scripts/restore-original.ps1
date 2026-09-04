@@ -19,12 +19,28 @@ function Stop-EntryGuardProcesses {
 
 Write-Host ""
 Write-Host "正在移除入口自动切换助手..." -ForegroundColor Yellow
+Stop-EntryGuardProcesses
+$removed = $false
 try {
     Stop-ScheduledTask -TaskName "CodexZhCnEntryGuard" -ErrorAction SilentlyContinue
     Unregister-ScheduledTask -TaskName "CodexZhCnEntryGuard" -Confirm:$false -ErrorAction SilentlyContinue
+    $removed = -not (Get-ScheduledTask -TaskName "CodexZhCnEntryGuard" -ErrorAction SilentlyContinue)
+} catch {
+    Write-Host ("移除入口助手任务失败: " + $_.Exception.Message) -ForegroundColor Yellow
+}
+if (-not $removed) {
+    try {
+        & schtasks.exe /Delete /TN "CodexZhCnEntryGuard" /F 2>$null | Out-Null
+        $removed = -not (Get-ScheduledTask -TaskName "CodexZhCnEntryGuard" -ErrorAction SilentlyContinue)
+    } catch {
+        Write-Host ("schtasks 删除入口助手任务失败: " + $_.Exception.Message) -ForegroundColor Yellow
+    }
+}
+if ($removed) {
     Write-Host "已移除入口自动切换助手。" -ForegroundColor Green
-} catch {}
-Stop-EntryGuardProcesses
+} else {
+    Write-Host "警告：入口助手计划任务仍存在（CodexZhCnEntryGuard），请以管理员身份重跑恢复，或手动执行：schtasks /Delete /TN CodexZhCnEntryGuard /F" -ForegroundColor Yellow
+}
 Write-Host ""
 Write-Host "正在恢复原始语言配置..." -ForegroundColor Yellow
 $configPath = Join-Path $env:USERPROFILE ".codex\config.toml"

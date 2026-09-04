@@ -107,9 +107,8 @@ function Get-CodexCounts {
     return [pscustomobject]@{ Patched = $patched; NonPatched = $nonPatched }
 }
 
-function Invoke-EntryAction {
-    param($Paths, [string]$Action)
-    if ($Action -eq "none") { return }
+function Stop-NonPatchedProcs {
+    param($Paths)
     $procs = @(Get-Process -ErrorAction SilentlyContinue |
         Where-Object { $_.ProcessName -match '^(codex|chatgpt)$' } |
         Where-Object {
@@ -121,12 +120,43 @@ function Invoke-EntryAction {
     foreach ($p in $procs) {
         Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
     }
-    if ($Action -eq "switch") {
-        Write-GuardLog ("检测到原版入口被打开（{0} 个进程），正在切换为汉化版..." -f $procs.Count)
+    return $procs.Count
+}
+
+function Start-PatchedWithRetry {
+    param($Paths)
+    # 强杀原版后立即启动汉化版，会与原版残留的 Electron 单实例锁竞争导致秒退；
+    # 因此等旧进程完全退出 -> 启动 -> 短暂验证，失败则重试一次。
+    for ($attempt = 1; $attempt -le 2; $attempt++) {
+        Start-Sleep -Seconds 2
+        $left = @(Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -match '^(codex|chatgpt)$' })
+        foreach ($p in $left) { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue }
+        Start-Sleep -Seconds 2
+        Write-GuardLog ("启动汉化版（第 {0} 次尝试）..." -f $attempt)
         Start-Process -FilePath $Paths.ExePath -WorkingDirectory $Paths.AppDir
-    } else {
-        Write-GuardLog ("已关闭与汉化版并存的英文进程 {0} 个" -f $procs.Count)
+        Start-Sleep -Seconds 6
+        $counts = Get-CodexCounts -Paths $Paths
+        if ($counts.Patched -gt 0) {
+            Write-GuardLog ("汉化版已启动（patched 进程 {0} 个）。" -f $counts.Patched)
+            return $true
+        }
+        Write-GuardLog "汉化版启动后未存活（patched=0）。"
     }
+    Write-GuardLog "汉化版启动失败：两次尝试后仍无 patched 进程。"
+    return $false
+}
+
+function Invoke-EntryAction {
+    param($Paths, [string]$Action)
+    if ($Action -eq "none") { return }
+    if ($Action -eq "close-only") {
+        $killed = Stop-NonPatchedProcs -Paths $Paths
+        Write-GuardLog ("已关闭与汉化版并存的英文进程 {0} 个" -f $killed)
+        return
+    }
+    $killed = Stop-NonPatchedProcs -Paths $Paths
+    Write-GuardLog ("检测到原版入口被打开（已关闭原版进程 {0} 个），正在切换为汉化版..." -f $killed)
+    [void](Start-PatchedWithRetry -Paths $Paths)
 }
 
 function Test-SwitchNeeded {

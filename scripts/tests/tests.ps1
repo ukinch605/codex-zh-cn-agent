@@ -146,6 +146,8 @@ Assert-True "已收录 26.831.1445.0" ([bool](@($vj.tested) | Where-Object { $_.
 Assert-NotNull "按版本查到 26.831.1445.0 特征串" (Get-TestedMarkers -CodexVersion "26.831.1445.0" -VersionsFile $vfile)
 Assert-True "已收录 26.901.4073.0" ([bool](@($vj.tested) | Where-Object { $_.version -eq "26.901.4073.0" }))
 Assert-NotNull "按版本查到 26.901.4073.0 特征串" (Get-TestedMarkers -CodexVersion "26.901.4073.0" -VersionsFile $vfile)
+Assert-True "已收录 26.901.2854.0" ([bool](@($vj.tested) | Where-Object { $_.version -eq "26.901.2854.0" }))
+Assert-NotNull "按版本查到 26.901.2854.0 特征串" (Get-TestedMarkers -CodexVersion "26.901.2854.0" -VersionsFile $vfile)
 Assert-True "未知版本查表返回空" ($null -eq (Get-TestedMarkers -CodexVersion "99.9.9.9" -VersionsFile $vfile))
 
 # ---------- 监督式启动（launch-zh-cn.ps1） ----------

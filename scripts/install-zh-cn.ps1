@@ -489,6 +489,7 @@ function Install-EntryGuard {
     try {
         Stop-ScheduledTask -TaskName "CodexZhCnEntryGuard" -ErrorAction SilentlyContinue
         Unregister-ScheduledTask -TaskName "CodexZhCnEntryGuard" -Confirm:$false -ErrorAction SilentlyContinue
+        Stop-EntryGuardProcesses
         # 优先使用 VBScript 隐藏启动器：计划任务直接启动 powershell 会在部分系统闪现命令行窗口
         $guardLauncher = Join-Path $toolHome "scripts\entry-guard-launcher.vbs"
         if (Test-Path -LiteralPath $guardLauncher) {
@@ -497,23 +498,23 @@ function Install-EntryGuard {
         } else {
             $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument ("-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"" + $guard + "`"")
         }
-        $trigger = $null
+        # 触发器：登录自启 + Once(约 1 分钟后)每 5 分钟重复触发。
+        # 若把 Repetition 挂到 LogonTrigger 上，登录会话中途注册时 NextRunTime 为空、自愈不生效；
+        # 独立注册 Once+Repetition 触发器可确保注册后立即进入 5 分钟自愈节奏（配合单实例互斥）。
+        $triggers = @()
         try {
-            $trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
+            $triggers += New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
         } catch {
-            $trigger = New-ScheduledTaskTrigger -AtLogOn
+            $triggers += New-ScheduledTaskTrigger -AtLogOn
         }
-        # 每 5 分钟重复触发：配合入口助手的单实例互斥实现自愈
-        # （助手被外部终止后，最多 5 分钟由下一次触发自动拉起；RestartOnFailure 对 0xC000013A 不生效）
         try {
-            $repTrigger = New-ScheduledTaskTrigger -Once -At (Get-Date).Date.AddMinutes(1) -RepetitionInterval (New-TimeSpan -Minutes 5) -RepetitionDuration (New-TimeSpan -Days 3650)
-            $trigger.Repetition = $repTrigger.Repetition
+            $triggers += New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) -RepetitionInterval (New-TimeSpan -Minutes 5) -RepetitionDuration (New-TimeSpan -Days 3650)
         } catch {
             Write-Warn ("入口助手自愈触发配置失败（不影响登录自启）: " + $_.Exception.Message)
         }
         $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited
         $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero) -StartWhenAvailable -RestartCount 5 -RestartInterval (New-TimeSpan -Minutes 1)
-        Register-ScheduledTask -TaskName "CodexZhCnEntryGuard" -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force | Out-Null
+        Register-ScheduledTask -TaskName "CodexZhCnEntryGuard" -Action $action -Trigger $triggers -Principal $principal -Settings $settings -Force | Out-Null
         $guardLog = Join-Path (Join-Path $toolHome "logs") "entry-guard.log"
         $guardStarted = $false
         try {
@@ -557,13 +558,28 @@ function Stop-EntryGuardProcesses {
 }
 
 function Remove-EntryGuard {
+    # 顺序：先结束残留进程（避免任务 Running 导致 Unregister 失败）-> Stop -> Unregister -> 验证 -> schtasks 兜底
+    Stop-EntryGuardProcesses
+    $removed = $false
     try {
         Stop-ScheduledTask -TaskName "CodexZhCnEntryGuard" -ErrorAction SilentlyContinue
         Unregister-ScheduledTask -TaskName "CodexZhCnEntryGuard" -Confirm:$false -ErrorAction SilentlyContinue
-        Stop-EntryGuardProcesses
-        Write-Ok "已移除入口自动切换助手。"
+        $removed = -not (Get-ScheduledTask -TaskName "CodexZhCnEntryGuard" -ErrorAction SilentlyContinue)
     } catch {
-        Write-Warn ("移除入口助手失败: " + $_.Exception.Message)
+        Write-Warn ("移除入口助手任务失败: " + $_.Exception.Message)
+    }
+    if (-not $removed) {
+        try {
+            & schtasks.exe /Delete /TN "CodexZhCnEntryGuard" /F 2>$null | Out-Null
+            $removed = -not (Get-ScheduledTask -TaskName "CodexZhCnEntryGuard" -ErrorAction SilentlyContinue)
+        } catch {
+            Write-Warn ("schtasks 删除入口助手任务失败: " + $_.Exception.Message)
+        }
+    }
+    if ($removed) {
+        Write-Ok "已移除入口自动切换助手。"
+    } else {
+        Write-Warn "入口助手计划任务仍存在（CodexZhCnEntryGuard），请以管理员身份重跑恢复/卸载，或手动执行：schtasks /Delete /TN CodexZhCnEntryGuard /F"
     }
 }
 

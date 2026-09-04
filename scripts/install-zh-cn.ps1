@@ -44,6 +44,35 @@ $script:defaultMarkers = [pscustomobject]@{
     initTo         = 'let s=1,c=a?.get(`'
 }
 
+# ---------------- 受保护版本线（locale-only） ----------------
+$script:installMode = "patch"
+$script:localeOnlyFrom = "26.900.0.0"
+try {
+    if (Test-Path -LiteralPath $versionsFile) {
+        $vd0 = Get-Content -Raw -Encoding UTF8 $versionsFile | ConvertFrom-Json
+        if ($vd0.localeOnlyFrom) { $script:localeOnlyFrom = [string]$vd0.localeOnlyFrom }
+    }
+} catch {}
+
+function Test-LocaleOnlyVersion {
+    param([string]$Version)
+    function Get-VerParts([string]$V) {
+        $p = @(($V.Trim().TrimStart('v','V')) -split '\.')
+        $n = @()
+        for ($i = 0; $i -lt 4; $i++) {
+            if ($i -lt $p.Count) { $x = 0; [int]::TryParse($p[$i], [ref]$x) | Out-Null; $n += $x } else { $n += 0 }
+        }
+        return ,$n
+    }
+    $a = Get-VerParts $Version
+    $b = Get-VerParts $script:localeOnlyFrom
+    for ($i = 0; $i -lt 4; $i++) {
+        if ($a[$i] -lt $b[$i]) { return $false }
+        if ($a[$i] -gt $b[$i]) { return $true }
+    }
+    return $true
+}
+
 # ---------------- 基础工具 ----------------
 function Test-IsAdministrator {
     $p = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
@@ -96,7 +125,7 @@ function Write-Log {
 }
 
 function Write-ResultFile {
-    param([string]$Status, [string]$Code = "", [string]$Message = "", [string]$CodexVersion = "", [string]$PatchedDir = "", [string]$DiagFile = "", [string]$LaunchResultFile = "")
+    param([string]$Status, [string]$Code = "", [string]$Message = "", [string]$CodexVersion = "", [string]$PatchedDir = "", [string]$DiagFile = "", [string]$LaunchResultFile = "", [string]$Mode = "")
     try {
         New-Item -ItemType Directory -Path $toolHome -Force | Out-Null
         $obj = [ordered]@{
@@ -107,6 +136,7 @@ function Write-ResultFile {
             patchedDir   = $PatchedDir
             diagFile     = $DiagFile
             launchResultFile = $LaunchResultFile
+            mode         = $Mode
             updatedAt    = (Get-Date).ToString("yyyy-MM-ddTHH:mm:ss.fff")
         }
         [System.IO.File]::WriteAllText($resultFile, ($obj | ConvertTo-Json), (New-Object System.Text.UTF8Encoding($false)))
@@ -426,13 +456,14 @@ function Install-ToolFiles {
 }
 
 function Write-InstalledInfo {
-    param([string]$ToolVersion, [string]$CodexVersion, [string]$PatchedDir, [string]$OrigDir)
+    param([string]$ToolVersion, [string]$CodexVersion, [string]$PatchedDir, [string]$OrigDir, [string]$Mode = "patch")
     New-Item -ItemType Directory -Path $toolHome -Force | Out-Null
     $obj = [ordered]@{
         toolVersion = $ToolVersion
         codexVersion = $CodexVersion
         patchedDir = $PatchedDir
         origDir = $OrigDir
+        mode = $Mode
         installedAt = (Get-Date).ToString("yyyy-MM-ddTHH:mm:ss.fff")
     }
     [System.IO.File]::WriteAllText($installedFile, ($obj | ConvertTo-Json), (New-Object System.Text.UTF8Encoding($false)))
@@ -600,6 +631,50 @@ function Copy-AppDirectory {
     }
 }
 
+# ---------------- locale-only 安装（受保护版本线） ----------------
+function Start-OriginalCodex {
+    try {
+        $pkg2 = Get-AppxPackage -ErrorAction Stop | Where-Object { $_.Name -match 'Codex|OpenAI' } | Select-Object -First 1
+        if ($pkg2) {
+            $manifest = Get-AppxPackageManifest -Package $pkg2
+            $appId = $manifest.Package.Applications.Application[0].Id
+            Start-Process "explorer.exe" -ArgumentList "shell:AppsFolder\$($pkg2.PackageFamilyName)!$appId"
+            return $true
+        }
+    } catch { Write-Log ("启动原版失败（shell 方式）: " + $_.Exception.Message) }
+    return $false
+}
+
+function Install-ZhCnLocaleOnly {
+    param([string]$CodexVersion, [string]$CodexAppDir)
+    $script:installMode = "locale-only"
+    # 清理旧补丁模式残留：入口助手任务/副本记录/桌面快捷方式
+    Remove-EntryGuard
+    if (Test-Path -LiteralPath $activeFile) { Remove-Item -LiteralPath $activeFile -Force -ErrorAction SilentlyContinue }
+    $desktopL = [Environment]::GetFolderPath("Desktop")
+    if (-not $desktopL) { $desktopL = Join-Path $env:USERPROFILE "Desktop" }
+    foreach ($lnkName in @("Codex 汉化版.lnk", "Codex zh-CN.lnk")) {
+        $lnk = Join-Path $desktopL $lnkName
+        if (Test-Path $lnk) { Remove-Item -LiteralPath $lnk -Force -ErrorAction SilentlyContinue }
+    }
+    Write-Log "受保护版本线（$CodexVersion >= $script:localeOnlyFrom）：进入 locale-only 模式（不复制、不补丁、不装入口助手）"
+    Write-Step "该 Codex 版本线受官方完整性保护（asar 不可改动），将采用 locale-only 模式：仅写入 localeOverride = zh-CN，界面中文由官方 i18n 提供（联网/服务端开启后生效）。"
+    Set-LocaleOverrideZhCn
+    Write-Ok "语言配置已设为 zh-CN。"
+    Install-ToolFiles -SourceRoot $projectRoot
+    Write-Ok "工具已安装到固定目录: $toolHome"
+    $toolVersion = Get-ToolVersion
+    Write-InstalledInfo -ToolVersion $toolVersion -CodexVersion $CodexVersion -PatchedDir "" -OrigDir $CodexAppDir -Mode "locale-only"
+    Write-Step "正在重启原版 Codex（localeOverride 需重启生效）..."
+    Stop-CodexProcesses
+    if (Start-OriginalCodex) {
+        Write-Ok "已启动原版 Codex（显示语言取决于官方 i18n，联网后通常自动为中文）。"
+    } else {
+        Write-Warn "请从开始菜单手动打开 Codex。"
+    }
+    Write-Log "locale-only 安装完成"
+}
+
 # ---------------- 安装 ----------------
 function Install-ZhCn {
     param([string]$CodexAppDir)
@@ -609,6 +684,11 @@ function Install-ZhCn {
 
     $codexVersion = Get-CodexVersion
     Write-Log "开始安装。Codex 版本: $codexVersion，安装目录: $CodexAppDir"
+
+    if ($codexVersion -and (Test-LocaleOnlyVersion -Version $codexVersion)) {
+        Install-ZhCnLocaleOnly -CodexVersion $codexVersion -CodexAppDir $CodexAppDir
+        return
+    }
 
     $origText = Read-AppInitialText -AsarPath $asarPath
     if ($null -eq $origText) { throw "ASAR_PARSE_FAILED: 无法解析 app.asar（app-initial 未找到）" }
@@ -777,6 +857,8 @@ function Show-Status {
         try {
             $info = Get-Content -Raw -Encoding UTF8 $installedFile | ConvertFrom-Json
             Write-Info "工具版本: $($info.toolVersion)（安装于 $($info.installedAt)）"
+            $modeShow = if ($info.mode) { $info.mode } else { "patch" }
+            Write-Info "安装模式: $modeShow"
         } catch { Write-Info "installed.json 无法解析。" }
     } else {
         Write-Info "尚未安装 v1.1 工具信息（installed.json 缺失）。"
@@ -791,20 +873,14 @@ function Show-Verify {
         else { Write-Host "VERIFY: $Name=FAIL $Detail" -ForegroundColor Red; $script:verifyOk = $false }
     }
 
-    $patchedRoot = ""
-    $activeOk = $false
-    if (Test-Path -LiteralPath $activeFile) {
-        $lines = @(Get-Content -LiteralPath $activeFile -Encoding UTF8 | Where-Object { $_.Trim().Length -gt 0 })
-        if ($lines.Count -ge 1) {
-            $patchedRoot = $lines[0].Trim()
-            $activeOk = Test-Path (Join-Path $patchedRoot "app\resources\app.asar")
+    $mode = "patch"
+    try {
+        if (Test-Path -LiteralPath $installedFile) {
+            $mi = Get-Content -Raw -Encoding UTF8 $installedFile | ConvertFrom-Json
+            if ($mi.mode) { $mode = [string]$mi.mode }
         }
-    }
-    Assert-VerifyItem "patched-copy" $activeOk "汉化副本缺失: $activeFile"
-
-    $asarOk = $false
-    if ($activeOk) { $asarOk = ((Get-AsarI18nState -AsarPath (Join-Path $patchedRoot "app\resources\app.asar")) -eq "patched") }
-    Assert-VerifyItem "asar-patched" $asarOk "汉化副本 app.asar 未处于 patched 状态"
+    } catch {}
+    Assert-VerifyItem "mode" ($mode -in @("patch","locale-only")) "未知模式: $mode"
 
     $cfgOk = $false
     $cfgPath = Join-Path $env:USERPROFILE ".codex\config.toml"
@@ -813,6 +889,30 @@ function Show-Verify {
         $cfgOk = $cfgContent -match 'localeOverride\s*=\s*"zh-CN"'
     }
     Assert-VerifyItem "config-locale" $cfgOk $cfgPath
+
+    if ($mode -eq "locale-only") {
+        $procsLO = @(Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -match '^(codex|chatgpt)$' })
+        $origOk = $true
+        if ($procsLO.Count -gt 0) {
+            $badLO = @($procsLO | Where-Object { $_.Path -and -not $_.Path.StartsWith("C:\Program Files\WindowsApps", [System.StringComparison]::OrdinalIgnoreCase) })
+            $origOk = $badLO.Count -eq 0
+        }
+        Assert-VerifyItem "processes-from-original" $origOk "检测到非原版进程"
+    } else {
+        $patchedRoot = ""
+        $activeOk = $false
+        if (Test-Path -LiteralPath $activeFile) {
+            $lines = @(Get-Content -LiteralPath $activeFile -Encoding UTF8 | Where-Object { $_.Trim().Length -gt 0 })
+            if ($lines.Count -ge 1) {
+                $patchedRoot = $lines[0].Trim()
+                $activeOk = Test-Path (Join-Path $patchedRoot "app\resources\app.asar")
+            }
+        }
+        Assert-VerifyItem "patched-copy" $activeOk "汉化副本缺失: $activeFile"
+
+        $asarOk = $false
+        if ($activeOk) { $asarOk = ((Get-AsarI18nState -AsarPath (Join-Path $patchedRoot "app\resources\app.asar")) -eq "patched") }
+        Assert-VerifyItem "asar-patched" $asarOk "汉化副本 app.asar 未处于 patched 状态"
 
     $desktop = [Environment]::GetFolderPath("Desktop")
     if (-not $desktop) { $desktop = Join-Path $env:USERPROFILE "Desktop" }
@@ -860,6 +960,7 @@ function Show-Verify {
         $guardDetail = "无法读取入口助手任务: " + $_.Exception.Message
     }
     Assert-VerifyItem "guard-task" $guardOk $guardDetail
+    }
 
     if ($script:verifyOk) { Write-Host "VERIFY: OVERALL=OK" -ForegroundColor Green; return $true }
     Write-Host "VERIFY: OVERALL=FAIL" -ForegroundColor Red
@@ -965,7 +1066,7 @@ function Invoke-Main {
                         $lines = @(Get-Content -LiteralPath $activeFile | Where-Object { $_.Trim().Length -gt 0 })
                         if ($lines.Count -ge 1) { $patched = $lines[0].Trim() }
                     }
-                    Write-ResultFile -Status "ok" -Code "INSTALL_OK" -CodexVersion (Get-CodexVersion) -PatchedDir $patched -LaunchResultFile $launchResultFile
+                    Write-ResultFile -Status "ok" -Code "INSTALL_OK" -CodexVersion (Get-CodexVersion) -PatchedDir $patched -LaunchResultFile $launchResultFile -Mode $script:installMode
                 } catch {
                     $msg = $_.Exception.Message
                     $code = if ($msg -match '^([A-Z][A-Z_]+): ') { $matches[1] } else { "UNKNOWN" }

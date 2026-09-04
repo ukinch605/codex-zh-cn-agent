@@ -144,5 +144,6 @@ Note (v1.3.3+): the entry guard is self-healing. The scheduled task retriggers e
 ## Update strategy
 
 - After a Codex Store update, the localization may need re-installation; the installer automatically rebuilds the patched copy when the version changed.
+- Codex 26.900+ (including 26.901.x) is a protected version line: the official build performs whole-file integrity checking on app.asar (any byte change exits the app within seconds). The installer automatically falls back to **locale-only mode** for these versions: it only writes `localeOverride = "zh-CN"` and does not copy/patch/install the entry guard. Chinese UI then depends on the official i18n (enabled by the server once online). Verify is mode-aware (`VERIFY: mode=locale-only`).
 - The tool supports new versions via the `versions.json` table plus generic detection. If `VERSION_UNSUPPORTED` occurs, the diagnostic file is the input for a repository issue.
 - Optional online update (`检查更新.bat` / `-Action check-update`) is off by default and only runs when the user explicitly asks.

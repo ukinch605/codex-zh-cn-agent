@@ -241,8 +241,16 @@ function Invoke-SupervisedLaunch {
             $action = Get-GuardAction -Patched $info.Patched.Count -NonPatched $info.NonPatched.Count
             Write-LogLine ("poll#{0}: patched={1} nonpatched={2} action={3}" -f $poll, $info.Patched.Count, $info.NonPatched.Count, $action)
             if ($action -eq "ok") {
-                Write-LogLine "汉化版已稳定运行（patched 进程数: $($info.Patched.Count)）。"
-                return $true
+                # 稳定性复验：部分新版本线存在 asar 完整性保护，启动数秒后可能主动退出
+                Start-Sleep -Seconds 15
+                $info2 = Get-CodexProcessInfo
+                $action2 = Get-GuardAction -Patched $info2.Patched.Count -NonPatched $info2.NonPatched.Count
+                if ($action2 -eq "ok") {
+                    Write-LogLine ("汉化版稳定性复验通过（patched 进程数: {0}）。" -f $info2.Patched.Count)
+                    return $true
+                }
+                Write-LogLine "汉化版稳定性复验失败（启动后退出或出现非汉化进程，疑似受保护版本线）。"
+                $deadline = Get-Date
             }
             if ($action -eq "close") {
                 Stop-OnlyNonPatched -ProcessList $info.NonPatched

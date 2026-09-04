@@ -144,11 +144,15 @@ Assert-True "已收录 26.820.7780.0" ([bool](@($vj.tested) | Where-Object { $_.
 Assert-NotNull "按版本查到 26.820.7780.0 特征串" (Get-TestedMarkers -CodexVersion "26.820.7780.0" -VersionsFile $vfile)
 Assert-True "已收录 26.831.1445.0" ([bool](@($vj.tested) | Where-Object { $_.version -eq "26.831.1445.0" }))
 Assert-NotNull "按版本查到 26.831.1445.0 特征串" (Get-TestedMarkers -CodexVersion "26.831.1445.0" -VersionsFile $vfile)
-Assert-True "已收录 26.901.4073.0" ([bool](@($vj.tested) | Where-Object { $_.version -eq "26.901.4073.0" }))
-Assert-NotNull "按版本查到 26.901.4073.0 特征串" (Get-TestedMarkers -CodexVersion "26.901.4073.0" -VersionsFile $vfile)
-Assert-True "已收录 26.901.2854.0" ([bool](@($vj.tested) | Where-Object { $_.version -eq "26.901.2854.0" }))
-Assert-NotNull "按版本查到 26.901.2854.0 特征串" (Get-TestedMarkers -CodexVersion "26.901.2854.0" -VersionsFile $vfile)
 Assert-True "未知版本查表返回空" ($null -eq (Get-TestedMarkers -CodexVersion "99.9.9.9" -VersionsFile $vfile))
+Assert-True "localeOnlyFrom 存在" ([bool]$vj.localeOnlyFrom)
+Assert-Equal "localeOnlyFrom 为 26.900.0.0" "26.900.0.0" ([string]$vj.localeOnlyFrom)
+Assert-True "26.803 线走补丁模式" (-not (Test-LocaleOnlyVersion -Version "26.803.5235.0"))
+Assert-True "26.818 线走补丁模式" (-not (Test-LocaleOnlyVersion -Version "26.818.5229.0"))
+Assert-True "26.831 线走补丁模式" (-not (Test-LocaleOnlyVersion -Version "26.831.1445.0"))
+Assert-True "26.900 起走 locale-only" (Test-LocaleOnlyVersion -Version "26.900.0.0")
+Assert-True "26.901 走 locale-only" (Test-LocaleOnlyVersion -Version "26.901.2854.0")
+Assert-True "未来更高版本走 locale-only" (Test-LocaleOnlyVersion -Version "99.0.0.0")
 
 # ---------- 监督式启动（launch-zh-cn.ps1） ----------
 Write-Host ""

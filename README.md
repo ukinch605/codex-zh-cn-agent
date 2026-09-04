@@ -1,4 +1,4 @@
-# Codex 一键汉化（Codex Desktop zh-CN Agent Installer）v1.3.6
+# Codex 一键汉化（Codex Desktop zh-CN Agent Installer）v1.3.7
 
 > 让 Codex 的界面完整变成中文（左侧会话、新聊天、项目、计划、插件、设置、顶部菜单），全程离线，不登录 OpenAI 账号，不改原版安装，可一键恢复英文。
 > Fully localize Codex Desktop to Chinese (sidebar, new chat, projects, plans, plugins, settings, native menus). Works offline with API-key mode. Never modifies the original install and is fully reversible.
@@ -20,7 +20,7 @@ Codex 会按 `AGENTS.md` 的流程自动完成：拉取仓库 → 检测版本 �
 
 ### 方式 B：下载后双击（Fallback）
 
-1. 下载 Release 中的 `codex-zh-cn-agent-v1.3.6.zip` 并解压；
+1. 下载 Release 中的 `codex-zh-cn-agent-v1.3.7.zip` 并解压；
 2. 双击「安装汉化.bat」，UAC 弹窗点「是」，选 1 安装；
 3. 完成后从桌面快捷方式（中文系统为「Codex 汉化版」，其他语言系统为「Codex zh-CN」）或双击「启动汉化版.bat」启动。
 
@@ -35,6 +35,10 @@ Codex 会按 `AGENTS.md` 的流程自动完成：拉取仓库 → 检测版本 �
 | 26.803.5235.0 | 2026-08-08 | ✅ 通过 | 本仓库 v1.3 收录 |
 | 26.803.10989.0 | 2026-08-14 | ✅ 通过 | 应用内版本 26.803.81509；本仓库 v1.3.1 起收录 |
 | 26.818.5229.0 | 2026-08-23 | ✅ 通过 | 本仓库 v1.3.5 起收录（26.818 新版本线） |
+| 26.818.8289.0 | 2026-08-24 | ✅ 通过 | 本仓库 v1.3.7 收录 |
+| 26.820.7780.0 | 2026-08-26 | ✅ 通过 | 本仓库 v1.3.7 收录 |
+| 26.831.1445.0 | 2026-09-02 | ✅ 通过 | 本仓库 v1.3.7 收录（pnpm 长路径修复后实测） |
+| 26.901.4073.0 | 2026-09-04 | ✅ 通过 | 本仓库 v1.3.7 收录（26.901 新版本线） |
 
 > 你的版本不在表里？安装器会先做通用特征探测，大多数情况下仍能自动安装；只有结构变化过大才会报「版本无法自动识别」，此时请按下方「故障排查与反馈」提交诊断文件。
 >
@@ -61,7 +65,7 @@ Codex 会按 `AGENTS.md` 的流程自动完成：拉取仓库 → 检测版本 �
 ## 常见问题（FAQ）
 
 - **打开还是英文？** 安装后从任何入口打开 Codex 都会在约 1~2 秒内自动切换为中文版（原版英文窗口会短暂出现后被自动替换，属正常现象）。若未生效，先彻底关闭 Codex（任务栏右键退出），再重跑「安装汉化.bat」。
-- **GitHub 打不开 / 下载不了仓库？** agent 会自动按「GitHub 直连 → 备用域名 → 镜像站」的顺序尝试，全程不会改动你的网络设置；如果全部失败，会明确告诉你改用离线包：从 Release 下载 `codex-zh-cn-agent-v1.3.6.zip`（可以请朋友帮忙下载后传给你），解压后双击「安装汉化.bat」即可，全程不需要访问 GitHub。
+- **GitHub 打不开 / 下载不了仓库？** agent 会自动按「GitHub 直连 → 备用域名 → 镜像站」的顺序尝试，全程不会改动你的网络设置；如果全部失败，会明确告诉你改用离线包：从 Release 下载 `codex-zh-cn-agent-v1.3.7.zip`（可以请朋友帮忙下载后传给你），解压后双击「安装汉化.bat」即可，全程不需要访问 GitHub。
 - **桌面快捷方式叫什么？** 中文系统为「Codex 汉化版」，其他语言系统为 ASCII 名「Codex zh-CN」；双击它可直接启动中文版。
 - **Codex 自动更新后汉化失效？** 重新运行「安装汉化.bat」选 1 即可；如果提示“版本无法自动识别”，按下方反馈方式提交诊断文件。
 - **需要管理员权限吗？** 只需要安装/卸载时（复制商店安装目录会弹 UAC，点「是」）；日常启动不需要。
@@ -78,6 +82,7 @@ Codex 会按 `AGENTS.md` 的流程自动完成：拉取仓库 → 检测版本 �
 - 安装日志：`%USERPROFILE%\.codex\zh-cn-agent\logs\install-*.log`
 - 启动日志与结果：`%USERPROFILE%\.codex\zh-cn-agent\logs\launch-*.log` 与 `%USERPROFILE%\.codex\zh-cn-agent\launch-result.json`
 - 版本无法识别的诊断文件：`%USERPROFILE%\.codex\zh-cn-agent\logs\diagnostic-<版本>.txt`
+- 安装卡在“复制”阶段、报“未能找到路径的一部分”：新版 Codex 含 pnpm 长路径 junction，旧版工具的 Copy-Item 无法复制；请升级到 v1.3.7+（改用 robocopy /XJ 复制）。
 - 提交 issue 时请附上诊断文件/日志的完整内容，并注明 Codex 版本（开始菜单或 `Get-AppxPackage | Where-Object Name -match Codex` 可查看）。
 
 ## 原理（给感兴趣的人）

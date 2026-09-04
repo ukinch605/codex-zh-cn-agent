@@ -567,6 +567,23 @@ function Remove-EntryGuard {
     }
 }
 
+# ---------------- 目录复制（robocopy：兼容新版 pnpm 超长路径 junction） ----------------
+function Copy-AppDirectory {
+    param([string]$Source, [string]$Destination)
+    $src = $Source.TrimEnd('\')
+    $dst = $Destination.TrimEnd('\')
+    if (Test-Path -LiteralPath $dst) {
+        Remove-Item -LiteralPath $dst -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    New-Item -ItemType Directory -Path $dst -Force | Out-Null
+    # robocopy 原生支持超长路径；/XJ 跳过 pnpm-store 等 junction 符号链接，
+    # 避免 Copy-Item 遇到「未能找到路径的一部分」这类超长/重解析路径时报错。
+    & robocopy.exe $src $dst /E /COPY:DAT /DCOPY:DAT /R:1 /W:1 /NFL /NDL /NJH /NJS /NP /XJ | Out-Null
+    if ($LASTEXITCODE -ge 8) {
+        throw "COPY_FAILED: robocopy 复制失败（退出码 $LASTEXITCODE）$src -> $dst"
+    }
+}
+
 # ---------------- 安装 ----------------
 function Install-ZhCn {
     param([string]$CodexAppDir)
@@ -615,9 +632,9 @@ function Install-ZhCn {
             Remove-Item -LiteralPath $patchedRoot -Recurse -Force
         }
         New-Item -ItemType Directory -Path $patchedRoot -Force | Out-Null
-        Write-Step "正在复制 Codex 到汉化目录（需要 1-2 分钟）..."
+        Write-Step "正在复制 Codex 到汉化目录（需要 1-2 分钟，新版可能更久）..."
         Write-Log "复制 $CodexAppDir -> $patchedApp"
-        Copy-Item -LiteralPath $CodexAppDir -Destination $patchedApp -Recurse -Force
+        Copy-AppDirectory -Source $CodexAppDir -Destination $patchedApp
         Write-Log "复制完成"
     } else {
         Write-Ok "已存在匹配版本的汉化副本，直接复用。"

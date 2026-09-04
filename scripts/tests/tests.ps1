@@ -138,6 +138,14 @@ Assert-True "已收录 26.803.5235.0" ([bool](@($vj.tested) | Where-Object { $_.
 Assert-NotNull "按版本查到特征串" (Get-TestedMarkers -CodexVersion "26.803.5235.0" -VersionsFile $vfile)
 Assert-True "已收录 26.818.5229.0" ([bool](@($vj.tested) | Where-Object { $_.version -eq "26.818.5229.0" }))
 Assert-NotNull "按版本查到 26.818.5229.0 特征串" (Get-TestedMarkers -CodexVersion "26.818.5229.0" -VersionsFile $vfile)
+Assert-True "已收录 26.818.8289.0" ([bool](@($vj.tested) | Where-Object { $_.version -eq "26.818.8289.0" }))
+Assert-NotNull "按版本查到 26.818.8289.0 特征串" (Get-TestedMarkers -CodexVersion "26.818.8289.0" -VersionsFile $vfile)
+Assert-True "已收录 26.820.7780.0" ([bool](@($vj.tested) | Where-Object { $_.version -eq "26.820.7780.0" }))
+Assert-NotNull "按版本查到 26.820.7780.0 特征串" (Get-TestedMarkers -CodexVersion "26.820.7780.0" -VersionsFile $vfile)
+Assert-True "已收录 26.831.1445.0" ([bool](@($vj.tested) | Where-Object { $_.version -eq "26.831.1445.0" }))
+Assert-NotNull "按版本查到 26.831.1445.0 特征串" (Get-TestedMarkers -CodexVersion "26.831.1445.0" -VersionsFile $vfile)
+Assert-True "已收录 26.901.4073.0" ([bool](@($vj.tested) | Where-Object { $_.version -eq "26.901.4073.0" }))
+Assert-NotNull "按版本查到 26.901.4073.0 特征串" (Get-TestedMarkers -CodexVersion "26.901.4073.0" -VersionsFile $vfile)
 Assert-True "未知版本查表返回空" ($null -eq (Get-TestedMarkers -CodexVersion "99.9.9.9" -VersionsFile $vfile))
 
 # ---------- 监督式启动（launch-zh-cn.ps1） ----------
@@ -259,6 +267,20 @@ Assert-Equal "简体中文代码页用中文快捷方式名" "Codex 汉化版.ln
 Assert-Equal "英文代码页回退 ASCII 名" "Codex zh-CN.lnk" (Get-DesktopShortcutName -CodePage 1252)
 Assert-True "日文代码页回退 ASCII 名" ((Get-DesktopShortcutName -CodePage 932) -eq "Codex zh-CN.lnk")
 Assert-True "默认(当前系统)也能返回名称" ([bool](Get-DesktopShortcutName))
+
+# ---------- 目录复制（robocopy） ----------
+Write-Host ""
+Write-Host "【目录复制】" -ForegroundColor Yellow
+Assert-True "Copy-AppDirectory 已定义" ([bool](Get-Command Copy-AppDirectory -ErrorAction SilentlyContinue))
+$tmpCopy = Join-Path ([System.IO.Path]::GetTempPath()) ("zhcn-copy-" + [guid]::NewGuid().ToString("N"))
+$srcC = Join-Path $tmpCopy "src"
+$dstC = Join-Path $tmpCopy "dst"
+New-Item -ItemType Directory -Path $srcC -Force | Out-Null
+Set-Content -Path (Join-Path $srcC "a.txt") -Value "hello" -Encoding ASCII -NoNewline
+Copy-AppDirectory -Source $srcC -Destination $dstC
+Assert-True "robocopy 复制成功" (Test-Path -LiteralPath (Join-Path $dstC "a.txt"))
+Assert-True "复制内容一致" ((Get-Content -Raw (Join-Path $dstC "a.txt")) -eq "hello")
+Remove-Item -LiteralPath $tmpCopy -Recurse -Force -ErrorAction SilentlyContinue
 
 # ---------- 汇总 ----------
 Write-Host ""

@@ -58,6 +58,13 @@ if (Test-Path -LiteralPath $versionsLocal) {
 Write-Title
 Write-Info "本地工具版本: $localVersion"
 Write-Info "检查来源: https://github.com/$repo/releases"
+$officialSince = ""
+try {
+    $vd = Get-Content -Raw -Encoding UTF8 $versionsLocal | ConvertFrom-Json
+    if ($vd.officialLocaleSince) { $officialSince = [string]$vd.officialLocaleSince }
+} catch {}
+if ($officialSince) { Write-Info "官方本地语言确认自版本: $officialSince（locale-only 已自动生效）" }
+else { Write-Info "官方本地语言：尚未确认（26.900+ 中文依赖服务端开关）" }
 
 [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
 $release = $null

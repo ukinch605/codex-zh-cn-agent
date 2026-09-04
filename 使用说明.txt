@@ -1,5 +1,5 @@
 ==========================================
-  Codex Desktop 一键汉化包（zh-CN）v1.3.9
+  Codex Desktop 一键汉化包（zh-CN）v1.4.0
 ==========================================
 
 一、这是什么？
@@ -79,6 +79,12 @@
      locale-only 模式：只写 localeOverride="zh-CN"，不再复制/补丁/
      装守卫。界面中文由官方 i18n 提供（联网/服务端开启后生效），
      这是此类新版本唯一可行的汉化方式。
+
+  Q13：怎么防止 Codex 自动更新把汉化弄失效？
+  A：安装菜单第 7 项或运行 -Action freeze 可关闭 Microsoft Store
+     自动更新（策略 AutoDownload=2，需管理员）；也可在 Microsoft
+     Store → 设置里关闭「自动更新应用」。恢复用菜单第 8 项或
+     -Action unfreeze。这只对已装老版本（≤26.831）保住汉化有意义。
 
 五、工具目录与日志
   - 固定工具目录：%USERPROFILE%\.codex\zh-cn-agent\（桌面快捷方式指向这里，

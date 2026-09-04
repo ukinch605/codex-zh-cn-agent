@@ -13,7 +13,7 @@
   - 版本自适应：优先查 versions.json 已测版本表；未知版本用通用特征探测；仍失败则写诊断文件并报 VERSION_UNSUPPORTED。
 #>
 param(
-    [ValidateSet("menu","install","uninstall","status","verify","check-update","test")]
+    [ValidateSet("menu","install","uninstall","status","verify","check-update","test","freeze","unfreeze")]
     [string]$Action = "menu",
     [string]$CodexPath = "",
     [switch]$NoPause,
@@ -775,8 +775,85 @@ function Install-ZhCn {
     if (Test-Path -LiteralPath $launcher) {
         Start-Process -FilePath "powershell.exe" -ArgumentList @("-NoProfile","-ExecutionPolicy","Bypass","-WindowStyle","Hidden","-File","`"$launcher`"") -WindowStyle Hidden
         Write-Log "已调用过渡监督式启动脚本（结果见 launch-result.json）"
+        Wait-LaunchThenFallback -CodexVersion $codexVersion
     }
     Write-Log "安装完成，已启动汉化版"
+    if (-not (Test-LocaleOnlyVersion -Version $codexVersion)) {
+        Write-Info "提示：建议运行菜单[7]（-Action freeze）关闭商店自动更新，防止升级到受保护版本（26.900+）后汉化失效。"
+    }
+}
+
+# ---------------- 商店自动更新冻结（freeze / unfreeze） ----------------
+function Get-StorePolicyAutoDownload {
+    try {
+        $v = (Get-ItemProperty -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Store" -Name "AutoDownload" -ErrorAction Stop).AutoDownload
+        return $v
+    } catch { return $null }
+}
+function Test-StoreUpdatesFrozen {
+    param($Value)
+    return ($null -ne $Value -and ([int]$Value -eq 2))
+}
+function Set-StoreUpdatesFreeze {
+    param([bool]$Freeze)
+    $key = "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Store"
+    if ($Freeze) {
+        New-Item -Path $key -Force | Out-Null
+        New-ItemProperty -Path $key -Name "AutoDownload" -Value 2 -PropertyType DWord -Force | Out-Null
+    } else {
+        if (Test-Path $key) { Remove-ItemProperty -Path $key -Name "AutoDownload" -ErrorAction SilentlyContinue }
+    }
+    return (Test-StoreUpdatesFrozen (Get-StorePolicyAutoDownload))
+}
+function Get-OfficialLocaleSince {
+    param([string]$VersionsFileOverride = "")
+    $file = if ($VersionsFileOverride) { $VersionsFileOverride } else { $versionsFile }
+    try {
+        if (Test-Path -LiteralPath $file) {
+            $d = Get-Content -Raw -Encoding UTF8 $file | ConvertFrom-Json
+            if ($d.officialLocaleSince) { return [string]$d.officialLocaleSince }
+        }
+    } catch {}
+    return ""
+}
+function Show-StoreUpdateGuide {
+    param([bool]$Frozen)
+    Write-Host ""
+    if ($Frozen) { Write-Ok "已关闭 Microsoft Store 自动更新（策略 AutoDownload=2）。" }
+    else { Write-Ok "已恢复 Microsoft Store 自动更新（移除策略，跟随商店设置）。" }
+    Write-Info "双保险：可到「Microsoft Store -> 设置 -> 关闭『自动更新应用』」。"
+}
+function Invoke-FreezeAction {
+    param([bool]$Freeze)
+    $ok = Set-StoreUpdatesFreeze -Freeze $Freeze
+    if ($ok -eq $Freeze) { Show-StoreUpdateGuide -Frozen $Freeze }
+    else { Write-Warn "设置未生效，请以管理员身份重试，或按提示在 Microsoft Store 设置中手动操作。" }
+}
+
+function Wait-LaunchThenFallback {
+    param([string]$CodexVersion)
+    $deadline = (Get-Date).AddSeconds(150)
+    $status = ""
+    while ((Get-Date) -lt $deadline) {
+        Start-Sleep -Seconds 10
+        if (Test-Path -LiteralPath $launchResultFile) {
+            try {
+                $j = Get-Content -Raw -Encoding UTF8 $launchResultFile | ConvertFrom-Json
+                $status = [string]$j.status
+            } catch {}
+            if ($status) { break }
+        }
+    }
+    if ($status -ne "ok") {
+        Write-Warn "汉化版未能在预期时间内稳定运行（疑似受保护版本线），自动降级为 locale-only 模式..."
+        Write-Log "监督启动未确认成功（status=$status），自动降级 locale-only"
+        Remove-EntryGuard
+        if (Test-Path -LiteralPath $activeFile) { Remove-Item -LiteralPath $activeFile -Force -ErrorAction SilentlyContinue }
+        Stop-CodexProcesses
+        Start-OriginalCodex | Out-Null
+        $script:installMode = "locale-only"
+        Write-Warn "已降级：仅 localeOverride（中文依赖官方 i18n），原版 Codex 已重启。"
+    }
 }
 
 # ---------------- 卸载 ----------------
@@ -859,6 +936,13 @@ function Show-Status {
             Write-Info "工具版本: $($info.toolVersion)（安装于 $($info.installedAt)）"
             $modeShow = if ($info.mode) { $info.mode } else { "patch" }
             Write-Info "安装模式: $modeShow"
+            $olSince = Get-OfficialLocaleSince
+            if ($olSince) { Write-Info "官方本地语言确认自版本: $olSince（locale-only 已自动生效）" }
+            else { Write-Info "官方本地语言：尚未确认（26.900+ 中文依赖服务端开关）" }
+            $sv = Get-StorePolicyAutoDownload
+            if (Test-StoreUpdatesFrozen $sv) { Write-Ok "商店自动更新：已关闭（汉化受保护）" }
+            elseif ($null -eq $sv) { Write-Info "商店自动更新：未设置策略（跟随商店设置，可能自动升级）" }
+            else { Write-Info "商店自动更新：策略值 $sv（未冻结）" }
         } catch { Write-Info "installed.json 无法解析。" }
     } else {
         Write-Info "尚未安装 v1.1 工具信息（installed.json 缺失）。"
@@ -898,6 +982,7 @@ function Show-Verify {
             $origOk = $badLO.Count -eq 0
         }
         Assert-VerifyItem "processes-from-original" $origOk "检测到非原版进程"
+        Write-Host "VERIFY: locale-note=中文由官方 i18n 提供，国内网络下可能仍为英文" -ForegroundColor DarkGray
     } else {
         $patchedRoot = ""
         $activeOk = $false
@@ -982,7 +1067,9 @@ function Start-Menu {
         Write-Host "    [4] 恢复英文原版"
         Write-Host "    [5] 卸载汉化（删除汉化副本、恢复原配置）"
         Write-Host "    [6] 检查更新（联网，可选功能）"
-        Write-Host "    [7] 退出"
+        Write-Host "    [7] 阻止商店自动更新（保护老版本汉化）"
+        Write-Host "    [8] 恢复商店自动更新"
+        Write-Host "    [9] 退出"
         Write-Host ""
         $choice = Read-Host "  请输入数字后回车"
         switch ($choice) {
@@ -1042,7 +1129,21 @@ function Start-Menu {
                 if (Test-Path -LiteralPath $updater) { & $updater -NoPause } else { Write-Bad "未找到 check-update.ps1" }
                 if (-not $NoPause) { Read-Host "按 Enter 返回菜单" | Out-Null }
             }
-            "7" { return }
+            "7" {
+                Clear-Host
+                Write-Title
+                Write-Step "【阻止商店自动更新】"
+                Invoke-FreezeAction -Freeze $true
+                if (-not $NoPause) { Read-Host "按 Enter 返回菜单" | Out-Null }
+            }
+            "8" {
+                Clear-Host
+                Write-Title
+                Write-Step "【恢复商店自动更新】"
+                Invoke-FreezeAction -Freeze $false
+                if (-not $NoPause) { Read-Host "按 Enter 返回菜单" | Out-Null }
+            }
+            "9" { return }
             default { Write-Warn "无效输入，请重新选择。"; Start-Sleep -Seconds 1 }
         }
     }
@@ -1099,6 +1200,16 @@ function Invoke-Main {
         "test" {
             $t = Join-Path $scriptDir "tests\tests.ps1"
             if (Test-Path -LiteralPath $t) { & $t } else { Write-Bad "未找到 tests\tests.ps1"; exit 1 }
+        }
+        "freeze" {
+            Ensure-Administrator
+            Invoke-FreezeAction -Freeze $true
+            if (-not $NoPause) { Read-Host "按 Enter 退出" | Out-Null }
+        }
+        "unfreeze" {
+            Ensure-Administrator
+            Invoke-FreezeAction -Freeze $false
+            if (-not $NoPause) { Read-Host "按 Enter 退出" | Out-Null }
         }
         "uninstall" {
             if (-not $Force) {

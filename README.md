@@ -1,4 +1,4 @@
-# Codex 一键汉化（Codex Desktop zh-CN Agent Installer）v1.3.9
+# Codex 一键汉化（Codex Desktop zh-CN Agent Installer）v1.4.0
 
 > 让 Codex 的界面完整变成中文（左侧会话、新聊天、项目、计划、插件、设置、顶部菜单），全程离线，不登录 OpenAI 账号，不改原版安装，可一键恢复英文。
 > Fully localize Codex Desktop to Chinese (sidebar, new chat, projects, plans, plugins, settings, native menus). Works offline with API-key mode. Never modifies the original install and is fully reversible.
@@ -20,7 +20,7 @@ Codex 会按 `AGENTS.md` 的流程自动完成：拉取仓库 → 检测版本 �
 
 ### 方式 B：下载后双击（Fallback）
 
-1. 下载 Release 中的 `codex-zh-cn-agent-v1.3.9.zip` 并解压；
+1. 下载 Release 中的 `codex-zh-cn-agent-v1.4.0.zip` 并解压；
 2. 双击「安装汉化.bat」，UAC 弹窗点「是」，选 1 安装；
 3. 完成后从桌面快捷方式（中文系统为「Codex 汉化版」，其他语言系统为「Codex zh-CN」）或双击「启动汉化版.bat」启动。
 
@@ -67,12 +67,14 @@ Codex 会按 `AGENTS.md` 的流程自动完成：拉取仓库 → 检测版本 �
 ## 常见问题（FAQ）
 
 - **打开还是英文？** 安装后从任何入口打开 Codex 都会在约 1~2 秒内自动切换为中文版（原版英文窗口会短暂出现后被自动替换，属正常现象）。若未生效，先彻底关闭 Codex（任务栏右键退出），再重跑「安装汉化.bat」。
-- **GitHub 打不开 / 下载不了仓库？** agent 会自动按「GitHub 直连 → 备用域名 → 镜像站」的顺序尝试，全程不会改动你的网络设置；如果全部失败，会明确告诉你改用离线包：从 Release 下载 `codex-zh-cn-agent-v1.3.9.zip`（可以请朋友帮忙下载后传给你），解压后双击「安装汉化.bat」即可，全程不需要访问 GitHub。
+- **GitHub 打不开 / 下载不了仓库？** agent 会自动按「GitHub 直连 → 备用域名 → 镜像站」的顺序尝试，全程不会改动你的网络设置；如果全部失败，会明确告诉你改用离线包：从 Release 下载 `codex-zh-cn-agent-v1.4.0.zip`（可以请朋友帮忙下载后传给你），解压后双击「安装汉化.bat」即可，全程不需要访问 GitHub。
 - **桌面快捷方式叫什么？** 中文系统为「Codex 汉化版」，其他语言系统为 ASCII 名「Codex zh-CN」；双击它可直接启动中文版。
 - **Codex 自动更新后汉化失效？** 重新运行「安装汉化.bat」选 1 即可；如果提示“版本无法自动识别”，按下方反馈方式提交诊断文件。
 - **需要管理员权限吗？** 只需要安装/卸载时（复制商店安装目录会弹 UAC，点「是」）；日常启动不需要。
 - **会改我的模型/API 配置吗？** 不会。只写 `localeOverride = "zh-CN"`。
 - **会不会越用越臃肿？** 汉化副本只是程序本体的可写拷贝（约 1.7GB）；聊天记录存储在共享的 `%USERPROFILE%\.codex\` 下，不会写入副本。Codex 更新后旧版本副本会被自动清理，磁盘占用不会持续膨胀。
+- **26.900+ 版本还能离线汉化吗？** 不能。官方对 app.asar 做整文件完整性校验（实测任何字节改动都会在数秒后退出），且简体中文开关由服务端下发（国内无梯子连不上则为英文）。工具对 26.900+ 自动走 locale-only（仅写 `localeOverride`），并建议用「阻止商店自动更新」保住已装老版本（≤26.831）的汉化。
+- **如何防止 Codex 自动更新破坏汉化？** 菜单第 7 项或 `-Action freeze` 可关闭 Microsoft Store 自动更新（策略 `AutoDownload=2`，需管理员），也可在 Microsoft Store → 设置中关闭「自动更新应用」；恢复用菜单第 8 项或 `-Action unfreeze`。
 - **第一次安装为什么有点慢？** 需要把约 1.7GB 的程序复制一份并打补丁，杀毒软件扫描还可能造成几十秒延迟，1~3 分钟属正常，请耐心等待不要中断。
 - **日志显示“事件监听不可用，已进入定期扫描模式”？** 部分受限环境无法注册系统事件监听，助手会自动改用每 10 秒扫描兜底，切换延迟最长约 10 秒，功能不受影响。
 - **每几分钟闪一个命令行窗口？** v1.3.5 及更早版本中，这是入口助手每 5 分钟自愈触发造成的短暂闪现，属正常现象、不影响使用；v1.3.6 起改为完全隐藏启动，不再闪现。

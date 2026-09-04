@@ -288,6 +288,20 @@ Assert-True "robocopy 复制成功" (Test-Path -LiteralPath (Join-Path $dstC "a.
 Assert-True "复制内容一致" ((Get-Content -Raw (Join-Path $dstC "a.txt")) -eq "hello")
 Remove-Item -LiteralPath $tmpCopy -Recurse -Force -ErrorAction SilentlyContinue
 
+# ---------- freeze / officialLocaleSince ----------
+Write-Host ""
+Write-Host "【商店冻结与官方语言检测】" -ForegroundColor Yellow
+Assert-True "商店冻结判定:null->false" (-not (Test-StoreUpdatesFrozen $null))
+Assert-True "商店冻结判定:0->false" (-not (Test-StoreUpdatesFrozen 0))
+Assert-True "商店冻结判定:2->true" (Test-StoreUpdatesFrozen 2)
+Assert-True "商店冻结判定:4->false" (-not (Test-StoreUpdatesFrozen 4))
+$tmpOl = Join-Path ([System.IO.Path]::GetTempPath()) ("zhcn-ol-" + [guid]::NewGuid().ToString("N") + ".json")
+Set-Content -Path $tmpOl -Value '{"toolVersion":"1.4.0"}' -Encoding UTF8
+Assert-True "officialLocaleSince 缺省为空" ((Get-OfficialLocaleSince -VersionsFileOverride $tmpOl) -eq "")
+Set-Content -Path $tmpOl -Value '{"toolVersion":"1.4.0","officialLocaleSince":"26.901.4073.0"}' -Encoding UTF8
+Assert-Equal "officialLocaleSince 有值解析" "26.901.4073.0" (Get-OfficialLocaleSince -VersionsFileOverride $tmpOl)
+Remove-Item -LiteralPath $tmpOl -Force -ErrorAction SilentlyContinue
+
 # ---------- 汇总 ----------
 Write-Host ""
 Write-Host ("TEST SUMMARY: {0} passed, {1} failed" -f $script:passCount, $script:failCount) -ForegroundColor Cyan
